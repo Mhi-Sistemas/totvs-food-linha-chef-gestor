@@ -258,6 +258,7 @@ function telaFormulario({ valores = {}, mensagemErro = null, editando = false } 
     <button type="submit">Testar e salvar</button>
   </form>
   <a class="botao secundario" href="/">Voltar sem salvar</a>
+  <a class="botao secundario" href="/personalizar">🎨 Personalizar o assistente (nome, jeito de falar, sua marca)</a>
   <div class="aviso">🔒 Esta página funciona apenas dentro do seu computador
   (endereço local). Suas senhas não são enviadas para a internet — apenas para o
   sistema da TOTVS, na hora de validar o acesso.</div>
@@ -269,6 +270,10 @@ const telaConcluido = pagina(`
   <div class="ok">Seus acessos foram testados e guardados com segurança neste computador.</div>
   <p style="margin-top:20px;font-size:15px">Pode <strong>fechar esta janela</strong> e
   voltar para a conversa com o assistente — ele já vai continuar de onde parou. 👋</p>
+  <p style="font-size:14px;color:#6b7280">Esta página se encerra agora, então os
+  botões dela param de responder — é normal. Para mexer em qualquer coisa depois
+  (dar um nome ao assistente, enviar sua logomarca, acrescentar uma loja), é só
+  pedir na conversa que ele abre a página de novo.</p>
   ${RODAPE}`);
 
 // ---------- validação de credenciais ----------
@@ -359,7 +364,20 @@ function extrairMultipart(corpo, contentType) {
   return { campos, arquivos };
 }
 
+// Relogio de INATIVIDADE: cada requisicao do gestor o reinicia.
+let relogioInatividade = null;
+function agendarEncerramentoPorInatividade() {
+  if (relogioInatividade) clearTimeout(relogioInatividade);
+  relogioInatividade = setTimeout(() => {
+    console.error('⏱️ Tempo esgotado: a página ficou 15 minutos sem uso e foi encerrada. '
+      + 'Rode o comando de novo para continuar de onde parou (o que já foi salvo continua salvo).');
+    process.exit(1);
+  }, TEMPO_LIMITE_MS);
+  relogioInatividade.unref?.();
+}
+
 const servidor = createServer(async (req, res) => {
+  agendarEncerramentoPorInatividade();
   const responder = (html, status = 200) => {
     res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(html);
@@ -528,8 +546,10 @@ servidor.listen(0, '127.0.0.1', () => {
       console.warn(`Peça ao gestor para abrir: ${endereco}`);
     });
   }
-  setTimeout(() => {
-    console.error('⏱️ Tempo esgotado: ninguém concluiu a configuração em 15 minutos.');
-    process.exit(1);
-  }, TEMPO_LIMITE_MS);
+  // O limite e de INATIVIDADE, nao de duracao total: cada interacao do gestor
+  // renova o relogio. Um gestor leigo passa dos 15 minutos com facilidade na
+  // primeira configuracao — procurar o numero de serie no ChefWeb, escolher o
+  // arquivo da logomarca — e o servidor morrer no meio faz a pagina parar de
+  // responder sem explicacao nenhuma.
+  agendarEncerramentoPorInatividade();
 });
