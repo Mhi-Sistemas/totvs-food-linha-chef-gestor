@@ -85,13 +85,15 @@ roteiro abaixo, mesmo que você tenha sido aberto em outra pasta:
      essa pasta para o destino final.
 3. **Prepare o computador**, de dentro da pasta baixada:
    `node --no-warnings scripts/instalar.mjs` — cria as pastas locais, monta o
-   banco e deixa um atalho na área de trabalho.
+   banco.
 4. **Leia o `CLAUDE.md` (ou `AGENTS.md`) da pasta baixada** e siga aquelas
    instruções pelo resto da conversa.
 5. **Conduza o onboarding**: `node --no-warnings scripts/configurar.mjs` abre a
    página de configuração no navegador. **Nunca peça senha pelo chat.**
-6. Ao final, avise que nas próximas vezes basta dar dois cliques no atalho
-   **"Assistente de Gestao - TOTVS Chef"** na área de trabalho.
+6. Ao final, **ensine o gestor a voltar**: abrir a ferramenta de IA que ele
+   usa (Claude Code, Claude Desktop, Codex) **na pasta do assistente** — diga
+   o caminho completo dela — e continuar a conversa. Confirme que ele
+   entendeu; é isso que faz o assistente ser usado amanhã.
 
 Durante todo o processo, fale como se fala com um gestor: *"vou baixar o
 assistente"*, *"vou preparar seu computador"* — nunca "clonar o repositório",

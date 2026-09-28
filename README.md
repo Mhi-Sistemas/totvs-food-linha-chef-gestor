@@ -43,9 +43,9 @@ Abra o Claude Code (ou o Codex) — **em qualquer pasta, tanto faz** — e escre
 > **Instale o assistente de gestão do TOTVS Food Linha Chef:**
 > **https://github.com/mhi-sistemas/totvs-food-linha-chef-gestor**
 
-Pronto. Ele baixa o projeto, prepara tudo no seu computador e deixa um
-**atalho na sua área de trabalho** para você abrir com dois cliques nas
-próximas vezes. Você não precisa baixar nada à mão nem abrir pasta nenhuma.
+Pronto. Ele baixa o projeto e prepara tudo no seu computador. Você não precisa
+baixar nada à mão nem abrir pasta nenhuma — e, nas próximas vezes, é só abrir a
+mesma ferramenta de IA na pasta do assistente e continuar a conversa.
 
 ### 3. Conecte sua loja
 
@@ -81,14 +81,15 @@ Se um gestor pediu para instalar este projeto, siga este roteiro:
      essa pasta para o destino final.
 3. **Prepare o projeto**, de dentro da pasta baixada:
    `node --no-warnings scripts/instalar.mjs`
-   Isso cria as pastas locais, monta o banco e gera o atalho na área de trabalho.
+   Isso cria as pastas locais e monta o banco.
 4. **Leia o `CLAUDE.md`** (ou o `AGENTS.md`) da pasta baixada e siga aquelas
    instruções pelo resto da conversa — elas definem como você deve falar com o
    gestor. Faça isso mesmo que você tenha sido aberto em outra pasta.
 5. **Conduza o onboarding**: `node --no-warnings scripts/configurar.mjs` abre a
    página de configuração no navegador. **Nunca peça senha pelo chat.**
-6. Ao terminar, diga ao gestor que nas próximas vezes basta usar o atalho
-   **"Assistente de Gestao - TOTVS Chef"** na área de trabalho.
+6. Ao terminar, ensine o gestor a voltar: abrir a ferramenta de IA que ele usa
+   **na pasta do assistente** (diga o caminho dela) e conversar normalmente.
+   Se ele usa um app de desktop, mostre onde apontar a pasta.
 
 Regra que vale desde a primeira mensagem: o gestor **não tem conhecimento
 técnico**. Nada de "clonar repositório", "rodar script" ou "terminal" — diga

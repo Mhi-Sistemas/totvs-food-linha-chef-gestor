@@ -13,6 +13,12 @@ são escritas em linguagem de gestor, não de programador.
 
 ### Novidades
 
+- **O atalho da área de trabalho saiu.** Ele abria uma janela preta de
+  terminal e não ajudava quem usa o aplicativo de computador — quem já tinha o
+  atalho, ele é removido sozinho na atualização. Para voltar ao assistente,
+  abra a ferramenta de IA que você usa apontando para a pasta dele; o guia de
+  instalação mostra como em cada uma.
+
 - **Escolher o jeito do assistente ficou mais simples**: em vez de descrever
   num campo em branco, agora você marca as opções que combinam com você —
   "direto ao ponto", "sem termos técnicos", "sempre comparar com antes" — e
@@ -59,9 +65,8 @@ está disponível para qualquer gestor de food service, gratuitamente.
 
 Peça ao Claude Code ou ao Codex: *"instale o assistente de gestão do TOTVS
 Food Linha Chef"* e ele faz o resto — baixa, prepara o computador, abre uma
-página segura no navegador para você informar o acesso da TOTVS e deixa um
-atalho na área de trabalho. Você não abre pasta, não edita arquivo e não
-digita comando nenhum. Funciona no **Windows** e no **Mac**.
+página segura no navegador para você informar o acesso da TOTVS. Você não
+abre pasta, não edita arquivo e não digita comando nenhum. Funciona no **Windows** e no **Mac**.
 
 ### Seus dados, no seu primeiro dia
 

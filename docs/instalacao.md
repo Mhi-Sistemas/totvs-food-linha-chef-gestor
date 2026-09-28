@@ -57,9 +57,10 @@ qual** — escreva esta frase e aperte Enter:
 > **Instale o assistente de gestão do TOTVS Food Linha Chef:**
 > **https://github.com/mhi-sistemas/totvs-food-linha-chef-gestor**
 
-Ele vai baixar o projeto, preparar seu computador e criar um **atalho na sua
-área de trabalho**. Pode levar um ou dois minutos. Se ele pedir permissão para
-executar alguma coisa, pode autorizar.
+Ele vai baixar o projeto e preparar seu computador. Pode levar um ou dois
+minutos. Se ele pedir permissão para executar alguma coisa, pode autorizar.
+Ao terminar, **peça para ele te dizer em que pasta o assistente ficou** — é
+por ela que você volta nas próximas vezes.
 
 ## Passo 4 — Conectar sua loja
 
@@ -83,12 +84,17 @@ daí é só perguntar: *"como foram minhas vendas na semana passada?"*
 
 ## Nas próximas vezes
 
-Dê **dois cliques** no atalho **"Assistente de Gestao - TOTVS Chef"** que
-apareceu na sua área de trabalho. Ele abre o assistente já no lugar certo.
+Abra a mesma ferramenta de IA que você usa, **apontando para a pasta do
+assistente** — é só isso. Ele lembra de tudo: seus acessos, suas preferências
+e todo o histórico que já baixou.
 
-Se o atalho não tiver sido criado (acontece em alguns computadores da empresa),
-não tem problema: abra o Claude Code e peça *"abra o assistente de gestão do
-TOTVS Food"* — ele encontra a pasta sozinho.
+- **Claude Desktop**: abra o app e escolha a pasta do assistente.
+- **Claude Code ou Codex (no terminal)**: abra o terminal na pasta do
+  assistente e digite `claude` (ou `codex`).
+
+Não lembra onde ficou a pasta? Ela se chama **`assistente-totvs-chef`** e está
+dentro da sua pasta de usuário. Você também pode abrir a ferramenta de IA em
+qualquer lugar e pedir: *"abra o assistente de gestão do TOTVS Food"*.
 
 ---
 
@@ -100,7 +106,6 @@ TOTVS Food"* — ele encontra a pasta sozinho.
 | `npm não é reconhecido...` | Mesmo caso acima — o npm vem junto com o Node.js. |
 | O assistente diz que a versão do Node é antiga | Instale a versão **LTS** em <https://nodejs.org/pt> por cima da atual. |
 | Erro de permissão no Mac ao instalar | Tente `sudo npm install -g ...` e digite a senha do computador. |
-| O atalho não apareceu na área de trabalho | Siga a seção "Nas próximas vezes" acima. Nada se perde. |
 | As consultas voltam vazias ou incompletas | Seu usuário do ChefWeb precisa de **acesso total aos relatórios**, replicado **em todas as lojas**. Fale com seu contato TOTVS. |
 
 Travou em alguma coisa? Abra o assistente, cole a mensagem que apareceu e peça

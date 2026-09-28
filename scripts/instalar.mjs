@@ -8,21 +8,19 @@
 // Este script existe para que a instalacao seja UMA acao, feita pelo
 // assistente, e nao uma sequencia de comandos que o gestor precise entender:
 // confere a versao do Node, cria as pastas locais, monta o banco e deixa um
-// atalho na area de trabalho para reabrir o assistente com dois cliques.
 //
 // Uso:
-//   node --no-warnings scripts/instalar.mjs [--sem-atalho]
+//   node --no-warnings scripts/instalar.mjs
 
-import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { EH_WINDOWS, pastaAreaDeTrabalho } from './plataforma.mjs';
+import { pastaAreaDeTrabalho } from './plataforma.mjs';
 import { abrirBanco, criarSchema, CAMINHO_BANCO } from './criar-banco.mjs';
 import { carregarConexoes } from './conexoes.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NODE_MINIMO = [22, 5, 0];
-const NOME_ATALHO = 'Assistente de Gestao - TOTVS Chef';
 
 function versaoAtendeMinimo() {
   const atual = process.versions.node.split('.').map(Number);
@@ -33,60 +31,22 @@ function versaoAtendeMinimo() {
   return true;
 }
 
-// Atalho que entra na pasta do projeto e abre o assistente de IA instalado.
-// Tenta o Claude Code e, se nao houver, o Codex — o projeto funciona nos dois.
-function conteudoDoAtalho() {
-  if (EH_WINDOWS) {
-    return [
-      '@echo off',
-      'title Assistente de Gestao - TOTVS Food Linha Chef',
-      `cd /d "${RAIZ}"`,
-      'where claude >nul 2>nul',
-      'if %errorlevel%==0 (',
-      '  call claude',
-      '  goto fim',
-      ')',
-      'where codex >nul 2>nul',
-      'if %errorlevel%==0 (',
-      '  call codex',
-      '  goto fim',
-      ')',
-      'echo.',
-      'echo Nao encontrei o Claude Code nem o Codex neste computador.',
-      'echo Instale um dos dois seguindo o guia docs/instalacao.md e tente de novo.',
-      'echo.',
-      'pause',
-      ':fim',
-      '',
-    ].join('\r\n');
-  }
-  return [
-    '#!/bin/bash',
-    `cd "${RAIZ}" || exit 1`,
-    'if command -v claude >/dev/null 2>&1; then',
-    '  exec claude',
-    'elif command -v codex >/dev/null 2>&1; then',
-    '  exec codex',
-    'else',
-    '  echo "Nao encontrei o Claude Code nem o Codex neste computador."',
-    '  echo "Instale um dos dois seguindo o guia docs/instalacao.md e tente de novo."',
-    '  read -n 1 -s -r -p "Pressione qualquer tecla para fechar."',
-    'fi',
-    '',
-  ].join('\n');
-}
-
-function criarAtalho() {
+// Versoes anteriores criavam um atalho na area de trabalho que abria o CLI
+// num terminal. Nao servia: quem usa o app de desktop (Claude Desktop, por
+// exemplo) so via uma janela preta abrir, e nao ha como um atalho mandar o
+// app abrir uma pasta especifica. Removido — e removido tambem de quem ja o
+// tinha, para nao ficar um atalho quebrado na area de trabalho do gestor.
+function removerAtalhoAntigo() {
   const area = pastaAreaDeTrabalho();
-  if (!area) return null;
-  const caminho = join(area, `${NOME_ATALHO}${EH_WINDOWS ? '.cmd' : '.command'}`);
-  try {
-    writeFileSync(caminho, conteudoDoAtalho(), 'utf8');
-    if (!EH_WINDOWS) chmodSync(caminho, 0o755);
-    return caminho;
-  } catch {
-    return null;
+  if (!area) return false;
+  let removeu = false;
+  for (const nome of ['Assistente de Gestao - TOTVS Chef.cmd', 'Assistente de Gestao - TOTVS Chef.command']) {
+    try {
+      const caminho = join(area, nome);
+      if (existsSync(caminho)) { rmSync(caminho); removeu = true; }
+    } catch { /* sem permissao: tudo bem, e so um atalho */ }
   }
+  return removeu;
 }
 
 // Memoria persistente do assistente DESTE gestor: aprendizados (preferencias,
@@ -155,14 +115,8 @@ if (!versaoAtendeMinimo()) {
   try { criarSchema(db); } finally { db.close(); }
   console.log(`2. Banco de dados local pronto (${CAMINHO_BANCO}).`);
 
-  const semAtalho = process.argv.includes('--sem-atalho');
-  if (semAtalho) {
-    console.log('3. Atalho na area de trabalho: dispensado a pedido.');
-  } else {
-    const atalho = criarAtalho();
-    console.log(atalho
-      ? `3. Atalho criado na area de trabalho: "${NOME_ATALHO}".`
-      : '3. Nao consegui criar o atalho na area de trabalho (siga sem ele; nada se perde).');
+  if (removerAtalhoAntigo()) {
+    console.log('3. Atalho antigo da area de trabalho removido (ele abria um terminal e nao ajudava).');
   }
 
   const conexoes = carregarConexoes();

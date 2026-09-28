@@ -163,7 +163,7 @@ export async function aplicarAtualizacao({ silencioso = false } = {}) {
   // Reaplica preparacao e migracoes do banco na versao nova.
   spawnSync(
     process.execPath,
-    ['--no-warnings', join(RAIZ, 'scripts', 'instalar.mjs'), '--sem-atalho'],
+    ['--no-warnings', join(RAIZ, 'scripts', 'instalar.mjs')],
     { cwd: RAIZ, stdio: silencioso ? 'ignore' : 'inherit' }
   );
 

@@ -72,9 +72,9 @@ passo('configuração fictícia gravada', () => {
   }, null, 2), 'utf8');
 });
 
-// 3. Instalacao (banco + pastas; sem atalho para nao tocar a area de trabalho)
+// 3. Instalacao (banco + pastas)
 passo('instalar.mjs prepara o projeto', () => {
-  const { codigo, saida } = rodar([join(RAIZ, 'scripts', 'instalar.mjs'), '--sem-atalho']);
+  const { codigo, saida } = rodar([join(RAIZ, 'scripts', 'instalar.mjs')]);
   espera(codigo === 0, saida.slice(0, 200));
   espera(existsSync(join(DADOS, 'chef.db')), 'banco não foi criado');
   espera(existsSync(join(DADOS, 'memoria', 'aprendizados.md')) && existsSync(join(DADOS, 'memoria', 'handoff.md')), 'memória do gestor não foi criada');
@@ -235,7 +235,7 @@ passo('atualização preserva o que é do gestor', () => {
 
   // A preparacao que a atualizacao reexecuta (instalar + migracoes) tambem
   // nao pode encostar nesses arquivos.
-  const r = rodar([join(RAIZ, 'scripts', 'instalar.mjs'), '--sem-atalho']);
+  const r = rodar([join(RAIZ, 'scripts', 'instalar.mjs')]);
   espera(r.codigo === 0, r.saida.slice(0, 200));
   for (const [rel, conteudo] of antes) {
     espera(readFileSync(join(RAIZ, rel), 'utf8') === conteudo,
