@@ -26,7 +26,8 @@
 //   node --no-warnings scripts/benchmark.mjs enviar-pendentes        (usado pela rotina)
 //   node --no-warnings scripts/benchmark.mjs situacao
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, openSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { abrirNoSistema } from './plataforma.mjs';
@@ -41,6 +42,8 @@ const CAMINHO_ENVIADO = join(PASTA_DADOS, 'lista-espera-enviado.json');
 // de UMA VEZ: repetir vira insistencia, e ninguem gosta de ser cobrado duas
 // vezes pela mesma coisa.
 const CAMINHO_CONVITE = join(PASTA_DADOS, 'lista-espera-convite.json');
+// Enquanto a pagina do formulario esta no ar, este arquivo diz onde ela esta.
+const CAMINHO_PAGINA = join(PASTA_DADOS, 'lista-espera-pagina.json');
 
 // URL do webhook da lista de espera (definida pela mantenedora do projeto).
 const WEBHOOK_LISTA_ESPERA = 'https://flowhook.oruzz.com.br/webhook/b49c1b43-6321-48b7-a366-fb8f1e2bb320';
@@ -180,8 +183,25 @@ function lerCorpo(req) {
   });
 }
 
+// Mesma licao da pagina de configuracao: o servidor NAO pode morrer junto com
+// o comando que o abriu (o assistente tem limite de poucos minutos por
+// comando) nem por um relogio absoluto — preencher quatro campos com calma
+// passa de qualquer limite curto. Roda desanexado, com limite de INATIVIDADE.
+let relogioInatividade = null;
+function renovarInatividade(servidor) {
+  if (relogioInatividade) clearTimeout(relogioInatividade);
+  relogioInatividade = setTimeout(() => {
+    console.error('⏱️ A página ficou 15 minutos sem uso e foi encerrada. '
+      + 'Rode o comando de novo se o gestor ainda quiser entrar na lista.');
+    servidor.close(() => process.exit(1));
+    setTimeout(() => process.exit(1), 2000).unref?.();
+  }, 15 * 60 * 1000);
+  relogioInatividade.unref?.();
+}
+
 function abrirPaginaListaEspera() {
   const servidor = createServer(async (req, res) => {
+    renovarInatividade(servidor);
     const responder = (html, status = 200) => {
       res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
@@ -208,7 +228,12 @@ function abrirPaginaListaEspera() {
           responder(telaPendente);
           console.log('Pedido guardado localmente (webhook indisponível); a rotina reenvia.');
         }
-        setTimeout(() => process.exit(0), 800);
+        // Encerra so depois que a resposta terminar de sair — matar o
+        // processo no meio deixaria o gestor com a pagina pela metade.
+        res.on('finish', () => {
+          servidor.close(() => process.exit(0));
+          setTimeout(() => process.exit(0), 3000).unref?.();
+        });
         return undefined;
       }
       return responder(telaFormulario(), 404);
@@ -220,11 +245,50 @@ function abrirPaginaListaEspera() {
     const endereco = `http://127.0.0.1:${servidor.address().port}/`;
     console.log(`Página da lista de espera: ${endereco}`);
     console.log('Se não abrir sozinha, copie esse endereço e cole no navegador.');
+    mkdirSync(PASTA_DADOS, { recursive: true });
+    writeFileSync(CAMINHO_PAGINA, `${JSON.stringify({
+      endereco, pid: process.pid, iniciado_em: new Date().toISOString(),
+    }, null, 2)}
+`, 'utf8');
+    process.on('exit', () => { try { rmSync(CAMINHO_PAGINA); } catch { /* ja foi */ } });
     if (!process.argv.includes('--sem-navegador')) {
       abrirNoSistema(endereco, () => console.warn(`Peça ao gestor para abrir: ${endereco}`));
     }
-    setTimeout(() => { console.error('⏱️ Tempo esgotado (10 min) sem envio.'); process.exit(1); }, 10 * 60 * 1000);
+    renovarInatividade(servidor);
   });
+}
+
+// Sobe a pagina num processo proprio e devolve o controle ao assistente.
+function abrirDesanexado() {
+  try {
+    const e = JSON.parse(readFileSync(CAMINHO_PAGINA, 'utf8'));
+    process.kill(e.pid, 0);
+    console.log(`A página da lista de espera já está aberta em ${e.endereco}`);
+    process.exit(0);
+  } catch { /* nao havia pagina aberta */ }
+  mkdirSync(PASTA_DADOS, { recursive: true });
+  const log = openSync(join(PASTA_DADOS, 'lista-espera.log'), 'a');
+  const filho = spawn(process.execPath,
+    ['--no-warnings', fileURLToPath(import.meta.url), 'lista-espera', '--servidor',
+      ...process.argv.slice(3).filter((a) => a !== '--servidor')],
+    { detached: true, stdio: ['ignore', log, log] });
+  filho.unref();
+  const limite = Date.now() + 15_000;
+  const tentar = () => {
+    try {
+      const e = JSON.parse(readFileSync(CAMINHO_PAGINA, 'utf8'));
+      console.log(`Página da lista de espera aberta: ${e.endereco}`);
+      console.log('Ela fica no ar até o gestor enviar — ou 15 minutos sem uso.');
+      console.log('Depois, confira com: node --no-warnings scripts/benchmark.mjs situacao');
+      process.exit(0);
+    } catch { /* ainda subindo */ }
+    if (Date.now() > limite) {
+      console.error('Não consegui abrir a página. Veja data/lista-espera.log.');
+      process.exit(1);
+    }
+    setTimeout(tentar, 200);
+  };
+  tentar();
 }
 
 const acao = process.argv[2];
@@ -245,8 +309,10 @@ try {
         guardarPendente(inscricao);
         console.log(`Não consegui enviar agora (${erro.message}). Guardei o pedido — a rotina diária tenta de novo sozinha.`);
       }
-    } else {
+    } else if (process.argv.includes('--servidor')) {
       abrirPaginaListaEspera();
+    } else {
+      abrirDesanexado();
     }
   } else if (acao === 'enviar-pendentes') {
     if (!existsSync(CAMINHO_PENDENTES)) {

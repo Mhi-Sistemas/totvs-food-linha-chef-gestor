@@ -33,6 +33,10 @@ são escritas em linguagem de gestor, não de programador.
 
 ### Correções
 
+- **A página de inscrição no comparativo de mercado tinha os mesmos defeitos
+  da página de configuração**: era encerrada junto com o comando que a abriu e
+  tinha prazo fixo de 10 minutos. Agora fica no ar enquanto você preenche, e a
+  tela de confirmação chega inteira antes de ela se fechar.
 - O convite para o comparativo de mercado era esquecido no fim da configuração
   — agora ele acontece uma vez, e fica registrado para nunca mais se repetir.
 - Ao programar a busca da madrugada, o assistente passa a **explicar por quê**:

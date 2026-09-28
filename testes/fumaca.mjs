@@ -203,6 +203,46 @@ await passoAsync('página de configuração sobrevive a quem a abriu', async () 
   }
 });
 
+// 5d2. Formulario da lista de espera: mesma exigencia da pagina de
+// configuracao — sobreviver a quem o abriu e validar sem derrubar a pagina.
+// NAO envia nada: o envio valido dispararia para o webhook de verdade.
+await passoAsync('formulário da lista de espera se sustenta', async () => {
+  const bm = join(RAIZ, 'scripts', 'benchmark.mjs');
+  const estado = join(DADOS, 'lista-espera-pagina.json');
+  try {
+    const abrir = rodar([bm, 'lista-espera', '--sem-navegador']);
+    espera(abrir.codigo === 0, abrir.saida.slice(0, 200));
+    espera(existsSync(estado), 'deveria registrar onde a página está');
+
+    const { endereco } = JSON.parse(readFileSync(estado, 'utf8'));
+    const r = await fetch(endereco, { signal: AbortSignal.timeout(10_000) });
+    espera(r.status === 200, `a página deveria responder 200, veio ${r.status}`);
+    const html = await r.text();
+    for (const campo of ['empresa', 'nome', 'telefone', 'email']) {
+      espera(html.includes(`name="${campo}"`), `falta o campo ${campo}`);
+    }
+    const tf = /name="tf" value="([a-f0-9]+)"/.exec(html)?.[1];
+    espera(Boolean(tf), 'falta o token do formulário');
+
+    // Dado invalido volta com erro NA PROPRIA pagina, sem encerrar nada.
+    const ruim = await fetch(`${endereco}entrar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ tf, empresa: 'X', nome: 'Y', telefone: '1', email: 'nao-e-email' }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    espera(/não parece válido/.test(await ruim.text()), 'e-mail inválido deveria ser recusado com explicação');
+    const aindaNoAr = await fetch(endereco, { signal: AbortSignal.timeout(10_000) });
+    espera(aindaNoAr.status === 200, 'a página não pode cair depois de um erro de preenchimento');
+  } finally {
+    try {
+      const { pid } = JSON.parse(readFileSync(estado, 'utf8'));
+      process.kill(pid);
+    } catch { /* ja encerrou */ }
+    try { rmSync(estado); } catch { /* ok */ }
+  }
+});
+
 // 5e. ATUALIZAR NAO PODE APAGAR O QUE E DO GESTOR. A atualizacao automatica
 // roda sozinha, em silencio: se um dia ela sobrescrever as personalizacoes,
 // as metas, os relatorios gerados ou a memoria do assistente, o gestor perde
