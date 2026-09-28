@@ -111,6 +111,9 @@ function montarSeries(linhas) {
 }
 
 // Rosca: no maximo 6 fatias; o excedente vira "Outros" (regra de leitura).
+// Devolve tambem as LINHAS que foram para "Outros": quem olha o painel
+// pergunta na hora "o que tem aí dentro?", e a resposta ja esta em memoria —
+// vira um nivel clicavel, sem consulta nova.
 function montarFatias(linhas) {
   const colunas = Object.keys(linhas[0] ?? {});
   const [cNome, cValor] = colunas;
@@ -118,8 +121,25 @@ function montarFatias(linhas) {
   const principais = ordenadas.slice(0, ordenadas.length > 6 ? 5 : 6);
   const fatias = principais.map((l) => ({ nome: String(l[cNome]), valor: Number(l[cValor]) || 0 }));
   const resto = ordenadas.slice(principais.length);
-  if (resto.length > 0) fatias.push({ nome: 'Outros', valor: resto.reduce((s, l) => s + (Number(l[cValor]) || 0), 0) });
-  return fatias;
+  if (resto.length > 0) {
+    // O rotulo diz QUANTAS ficaram escondidas — e o convite para clicar.
+    fatias.push({
+      nome: `Outros (${resto.length})`,
+      valor: resto.reduce((s, l) => s + (Number(l[cValor]) || 0), 0),
+    });
+  }
+  return { fatias, resto };
+}
+
+// No de rosca com "Outros" NAVEGAVEL. Quem ve o painel pergunta na hora "o
+// que tem dentro de Outros?" — e a resposta ja esta em memoria. Cada clique
+// abre as maiores do resto, recursivamente, ate acabar: com 45 formas de
+// pagamento, "Outros" esconderia 40 delas (aconteceu num painel real).
+function noRosca(linhas, formato) {
+  const { fatias, resto } = montarFatias(linhas);
+  const no = { fatias, tabela: tabelaHtml(linhas, formato) };
+  if (resto.length > 0) no.filhos = { [`Outros (${resto.length})`]: noRosca(resto, formato) };
+  return no;
 }
 
 // A tabela alternativa fala a lingua do painel: cabecalho amigavel (nunca a
@@ -266,14 +286,17 @@ function montarNo(db, spec, g, valorFiltro, nivel, pai) {
     .replaceAll('{{pai}}', String(pai ?? '').replaceAll("'", "''"));
   const linhas = db.prepare(sql).all();
   const tabela = tabelaHtml(linhas, g.formato ?? 'numero');
-  const no = g.tipo === 'rosca'
-    ? { fatias: montarFatias(linhas), tabela }
-    : { ...montarSeries(linhas), tabela };
+  let no;
+  if (g.tipo === 'rosca') {
+    no = noRosca(linhas, g.formato ?? 'numero');
+  } else {
+    no = { ...montarSeries(linhas), tabela };
+  }
   if (niveis && nivel + 1 < niveis.length) {
     const nomes = (g.tipo === 'rosca' ? (no.fatias ?? []).map((f) => f.nome) : (no.categorias ?? []))
-      .filter((n) => n !== 'Outros').slice(0, MAX_FILHOS_DRILL);
+      .filter((n) => !/^Outros( \(\d+\))?$/.test(n)).slice(0, MAX_FILHOS_DRILL);
     if (nomes.length > 0) {
-      no.filhos = {};
+      no.filhos = no.filhos ?? {};
       for (const nome of nomes) no.filhos[nome] = montarNo(db, spec, g, valorFiltro, nivel + 1, nome);
     }
   }
