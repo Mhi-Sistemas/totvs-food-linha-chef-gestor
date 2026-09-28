@@ -11,6 +11,14 @@ são escritas em linguagem de gestor, não de programador.
 
 ## [1.0.3] — 28/09/2026
 
+### Correções
+
+- **Uma loja sem permissão deixava as outras sem dados.** Quando o usuário do
+  ChefWeb não tinha acesso a alguma loja, a busca parava ali e **nenhuma loja
+  seguinte** era baixada — sem aviso. Num grupo de 36 lojas, só as 5 primeiras
+  tinham estoque. Agora o assistente pula a loja recusada, continua nas demais
+  e te avisa quais ficaram de fora e como liberar o acesso no ChefWeb.
+
 ### Novidades
 
 - **Quanto entrou e saiu de cada conta**: nova análise do livro caixa por conta

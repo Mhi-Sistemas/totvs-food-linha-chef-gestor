@@ -177,6 +177,13 @@ Classificação usada:
 - **Causa**: o usuário da API precisa de **permissão de acesso total aos
   relatórios** no ChefWeb, **replicada em todas as lojas** da rede.
 - **Classificação**: persistente (de configuração).
+- ⚠️ **Efeito colateral grave (corrigido em 28/09/2026)**: como a busca percorre
+  as lojas em ordem, a exceção de UMA loja abortava o domínio inteiro e todas
+  as lojas seguintes ficavam sem dado, em silêncio. Caso real: num grupo de 36
+  lojas, a loja 6 não tinha permissão e só as 5 primeiras tinham estoque — as
+  outras 31 nunca foram sequer tentadas. **Autofix**: `registrarSemAcesso()` em
+  `sincronizar.mjs` reconhece a assinatura, pula a loja, segue nas demais e
+  registra alerta ao gestor com a lista das recusadas.
 - **Autofix**: a coleta histórica pula a loja inteira já na primeira falha de
   acesso (permissão não muda no meio da execução) e orienta conceder a
   permissão no ChefWeb; o erro não conta para o freio global. Nos demais
