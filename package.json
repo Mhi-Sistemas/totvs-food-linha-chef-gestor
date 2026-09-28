@@ -1,0 +1,36 @@
+{
+  "name": "totvs-food-linha-chef-gestor",
+  "version": "1.0.0",
+  "description": "Assistente de gestão para o TOTVS Food Linha Chef via Claude Code ou Codex: sincroniza dados das APIs do ChefWeb para um banco local e gera análises e gráficos gerenciais.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "instalar": "node --no-warnings scripts/instalar.mjs",
+    "rotina": "node --no-warnings scripts/rotina.mjs",
+    "backup": "node --no-warnings scripts/backup.mjs",
+    "atualizar": "node --no-warnings scripts/atualizar.mjs",
+    "reportar": "node --no-warnings scripts/reportar.mjs",
+    "configurar": "node --no-warnings scripts/configurar.mjs",
+    "testar-conexao": "node --no-warnings scripts/testar-conexao.mjs",
+    "criar-banco": "node --no-warnings scripts/criar-banco.mjs",
+    "sincronizar": "node --no-warnings scripts/sincronizar.mjs",
+    "consultar": "node --no-warnings scripts/consultar.mjs",
+    "categorias-pagamento": "node --no-warnings scripts/categorias-pagamento.mjs",
+    "categorias-planos": "node --no-warnings scripts/categorias-planos.mjs",
+    "metas": "node --no-warnings scripts/metas.mjs",
+    "exportar": "node --no-warnings scripts/exportar.mjs",
+    "painel": "node --no-warnings scripts/painel.mjs",
+    "dre": "node --no-warnings scripts/dre.mjs",
+    "email": "node --no-warnings scripts/email.mjs",
+    "abrir": "node --no-warnings scripts/abrir.mjs",
+    "lojas": "node --no-warnings scripts/lojas.mjs",
+    "agendar": "node --no-warnings scripts/agendar.mjs",
+    "analisar": "node --no-warnings scripts/analisar.mjs",
+    "decisoes": "node --no-warnings scripts/decisoes.mjs",
+    "calendario": "node --no-warnings scripts/calendario.mjs"
+  },
+  "license": "MIT"
+}

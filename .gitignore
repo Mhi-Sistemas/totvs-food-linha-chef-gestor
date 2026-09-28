@@ -1,0 +1,26 @@
+# Credenciais — NUNCA versionar
+.env
+.env.*
+
+# Dados locais do gestor
+data/
+relatorios/
+
+# Personalizações do gestor (só os modelos do projeto são versionados)
+personalizados/*
+!personalizados/README.md
+!personalizados/exemplo-minha-analise.md
+
+# Espaco livre de desenvolvimento (rascunhos, experimentos) - nunca versionado
+dev/
+
+# Instrucoes locais por maquina (modo desenvolvimento etc.)
+CLAUDE.local.md
+AGENTS.local.md
+
+# Node
+node_modules/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db

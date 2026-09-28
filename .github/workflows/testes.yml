@@ -1,0 +1,25 @@
+# Testes de fumaça em macOS, Windows e Linux de verdade — porque a promessa
+# "funciona no Windows e no Mac" precisa de máquina, não de fé.
+# Enquanto o repositório for privado, os minutos de macOS contam 10x na cota
+# gratuita; quando ficar público, é ilimitado.
+name: Testes de fumaça
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  fumaca:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Teste de fumaça
+        run: node --no-warnings testes/fumaca.mjs

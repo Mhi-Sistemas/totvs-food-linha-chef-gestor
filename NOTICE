@@ -1,0 +1,46 @@
+Assistente de Gestão para TOTVS Food Linha Chef
+Copyright (c) 2026 MHI Sistemas — https://www.mhi.com.br
+
+Este software foi criado e é mantido pela MHI Sistemas, revenda do TOTVS Food
+Linha Chef, e distribuído gratuitamente sob a Licença MIT (veja o arquivo
+LICENSE).
+
+CONDIÇÃO DE USO E REDISTRIBUIÇÃO
+--------------------------------
+A Licença MIT permite usar, copiar, modificar, mesclar, publicar, distribuir,
+sublicenciar e vender cópias deste software, INCLUSIVE para fins comerciais,
+desde que o aviso de copyright acima e o texto da licença sejam mantidos em
+todas as cópias ou partes substanciais do software.
+
+Remover, ocultar ou substituir a atribuição de autoria — no código, na
+documentação, nas telas do produto ou nos arquivos que ele gera — constitui
+violação dos termos da licença.
+
+MARCAS
+------
+"MHI Sistemas" é marca de titularidade da MHI Sistemas. A licença deste
+software concede direitos sobre o código, NÃO sobre o nome, a marca ou a
+identidade visual da MHI Sistemas, cujo uso depende de autorização expressa.
+
+"TOTVS" é marca registrada da TOTVS S.A. "TOTVS Food Linha Chef", "Chef" e
+"ChefWeb" são nomes de produtos da TOTVS, citados neste projeto apenas para
+identificar o sistema ao qual o assistente se conecta — uso nominativo, sem
+qualquer pretensão de titularidade.
+
+Este é um projeto independente, SEM vínculo, patrocínio ou endosso oficial da
+TOTVS. O logotipo do TOTVS Chef presente em assets/ é utilizado apenas para
+identificar visualmente o sistema ao qual o assistente se conecta.
+
+ISENÇÃO
+-------
+O software é fornecido "COMO ESTÁ", sem garantias de qualquer natureza. O uso
+é por conta e risco do usuário. Confira sempre números críticos diretamente no
+sistema oficial antes de tomar decisões. Análises fiscais produzidas por este
+software são indícios para revisão com profissional contábil habilitado, e não
+constituem parecer tributário.
+
+## Componentes de terceiros
+
+- Apache ECharts (assets/echarts.min.js) — Copyright Apache Software
+  Foundation, licenciado sob a Apache License 2.0. O cabecalho de licenca
+  original e mantido no proprio arquivo. https://echarts.apache.org
