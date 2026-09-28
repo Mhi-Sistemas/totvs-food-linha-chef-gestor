@@ -9,6 +9,29 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.5] — 28/09/2026
+
+### Novidades
+
+- **Suas metas aparecem nos painéis.** Todo indicador com meta definida passa a
+  mostrar, no próprio cartão, se está dentro (verde) ou quanto estourou
+  (vermelho, com a diferença exata) — e os gráficos ganham a linha da meta, o
+  que mostra **em que mês** o número saiu do trilho, não só que saiu.
+- Gráficos de percentual agora mostram o "%" no eixo, em vez de números soltos.
+
+### Correções
+
+- **Feriados escritos um por cima do outro** nos gráficos de linha viravam
+  borrão ("CarnavalCarnavalCinzas"). Agora os nomes se revezam e só aparecem
+  quando há espaço — a marca da data continua em todos.
+- O último valor do eixo aparecia cortado ("R$ 1,8 n" em vez de "R$ 1,8 mi"),
+  e o valor da maior barra também.
+- Nos gráficos de barras com poucas colunas, alguns rótulos sumiam — faltavam
+  segunda, quarta e sexta no gráfico por dia da semana.
+- Um painel podia sair **completamente em branco, sem erro nenhum**, quando a
+  receita do painel usava um filtro que não existia. Agora ele é ignorado com
+  aviso, e o painel sai com todos os dados.
+
 ## [1.0.4] — 28/09/2026
 
 ### Novidades

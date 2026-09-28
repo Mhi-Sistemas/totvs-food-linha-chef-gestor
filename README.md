@@ -22,6 +22,67 @@ assinatura própria dessas ferramentas).
 
 ---
 
+## 👀 O que ele entrega
+
+Painéis assim saem de **uma frase sua**, em segundos — e abrem no navegador,
+funcionam sem internet e podem ser enviados para quem você quiser.
+
+### "Monte um painel das minhas vendas"
+
+![Painel de vendas](docs/imagens/painel-vendas.png)
+
+Faturamento, cupons e ticket médio já comparados com o ano passado; o
+movimento dia a dia com os feriados marcados; o que mais vende **por
+categoria, clicando para abrir até o produto**; os horários de pico; e como os
+clientes pagam. O seletor no topo refaz tudo para uma loja só.
+
+### "Compare minhas lojas"
+
+![Comparativo entre lojas](docs/imagens/comparativo-lojas.png)
+
+Aqui o assistente não só mostra: ele aponta. Uma das lojas caiu 30% a partir
+de maio enquanto a rede crescia — o tipo de coisa que passa despercebida no
+número consolidado e aparece na primeira olhada quando cada loja tem sua linha.
+
+### "Como está meu financeiro?"
+
+![Painel financeiro](docs/imagens/painel-financeiro.png)
+
+Para onde o dinheiro está indo (com mergulho no plano de contas), entradas
+contra saídas mês a mês, os maiores fornecedores, o que ainda vai cair de
+cartão e a lista de contas em aberto — com busca e filtros.
+
+### "Tem algo errado na operação?"
+
+![Auditoria de operação](docs/imagens/auditoria-operacao.png)
+
+Descontos e cancelamentos por operador, motivos informados e as diferenças de
+caixa, fechamento a fechamento. No exemplo, **um operador concentra 7 de cada
+10 reais em desconto da rede** — não prova nada sozinho, mas é a conversa que
+ninguém estava tendo.
+
+### "Como está meu CMV contra a minha meta?"
+
+![CMV e CMO com metas](docs/imagens/cmv-cmo-metas.png)
+
+Você define suas metas conversando — *"minha meta de CMV é 33%"* — e todo
+indicador que tem meta passa a aparecer comparado com ela: **verde quando está
+dentro, vermelho com a diferença exata quando estoura**. No exemplo, o custo
+dos produtos furou a meta e o gráfico mostra **em que mês a pressão começou**;
+o custo de equipe, no mesmo período, segue folgado.
+
+### "O que está acabando?" · "O que dá lucro de verdade?"
+
+| Estoque e compras | Engenharia de cardápio |
+|---|---|
+| [![Estoque](docs/imagens/estoque-compras.png)](docs/imagens/estoque-compras.png) | [![Cardápio](docs/imagens/engenharia-cardapio.png)](docs/imagens/engenharia-cardapio.png) |
+| Itens críticos para repor hoje, valor parado por categoria e a posição completa por loja | Curva ABC com **margem por item**: o campeão de volume quase nunca é o campeão de lucro |
+
+> Os números e nomes destas imagens são de uma **rede fictícia**, criada só
+> para a demonstração. Seus dados nunca saem do seu computador.
+
+---
+
 ## 🚀 Como começar
 
 São **3 passos** — e o assistente faz o passo 2 e o 3 sozinho, você só conversa.

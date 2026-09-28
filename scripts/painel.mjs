@@ -78,8 +78,24 @@ function validarSql(sql, onde) {
 // Substitui o marcador {{parametro}} pelo valor da opcao do filtro (aspas
 // simples escapadas). Valor vazio = opcao "Todos".
 function aplicarFiltro(sql, parametro, valor) {
-  if (!parametro) return sql;
-  return String(sql).replaceAll(`{{${parametro}}}`, String(valor ?? '').replaceAll("'", "''"));
+  let texto = String(sql);
+  if (parametro) {
+    texto = texto.replaceAll(`{{${parametro}}}`, String(valor ?? '').replaceAll("'", "''"));
+  }
+  // Marcador que sobrou (espec com {{loja}} mas SEM filtro declarado, ou nome
+  // de parametro diferente) vira VAZIO. Antes ficava literal no SQL e a
+  // condicao '{{loja}}'='' dava sempre falso: o painel saia em branco, sem
+  // erro nenhum — o pior tipo de defeito, porque parece que nao ha dados.
+  const sobrando = [...texto.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]);
+  if (sobrando.length > 0) {
+    const nomes = [...new Set(sobrando)].filter((n) => n !== 'pai');
+    if (nomes.length > 0) {
+      console.warn(`   aviso: a consulta usa {{${nomes.join('}}, {{')}}} mas não há filtro `
+        + 'com esse nome na especificação — tratando como "todas".');
+    }
+    texto = texto.replace(/\{\{\w+\}\}/g, (m) => (m === '{{pai}}' ? m : ''));
+  }
+  return texto;
 }
 
 // Uma consulta de grafico devolve: 1a coluna = categoria/dia, 2a = valor,
@@ -159,7 +175,16 @@ function executarConjunto(db, spec, valorFiltro) {
       const anterior = Object.values(db.prepare(aplicarFiltro(validarSql(k.delta_sql, k.rotulo), parametro, valorFiltro)).get() ?? {})[0];
       if (Number(anterior) > 0 && valor !== null) delta = ((Number(valor) - Number(anterior)) / Number(anterior)) * 100;
     }
-    return { valor, delta };
+    // META do gestor: indicador com meta SEMPRE se compara com ela. `meta_tipo`
+    // diz o sentido — 'teto' para custos (%CMV, %CMO: menor e melhor) e 'piso'
+    // para receitas (faturamento, ticket: maior e melhor).
+    let meta = null;
+    if (k.meta !== undefined && k.meta !== null && valor !== null) {
+      const tipo = k.meta_tipo === 'piso' ? 'piso' : 'teto';
+      const dentro = tipo === 'teto' ? Number(valor) <= Number(k.meta) : Number(valor) >= Number(k.meta);
+      meta = { alvo: Number(k.meta), tipo, dentro, diferenca: Number(valor) - Number(k.meta) };
+    }
+    return { valor, delta, meta };
   });
   const graficos = (spec.graficos ?? []).map((g) => montarNo(db, spec, g, valorFiltro, 0, null));
   return { kpis, graficos };
@@ -328,6 +353,7 @@ function gerarHtml(spec, dados) {
 
   const metasKpis = (spec.kpis ?? []).map((k) => ({ rotulo: k.rotulo, formato: k.formato ?? 'numero' }));
   const metasGraficos = (spec.graficos ?? []).map((g) => ({
+    meta: g.meta ?? null,
     tipo: g.tipo, titulo: g.titulo, formato: g.formato ?? 'numero',
     largura: g.largura === 'cheia' ? 'cheia' : 'meia',
   }));
@@ -349,8 +375,15 @@ function gerarHtml(spec, dados) {
       classe = `delta ${bom ? 'pos' : 'neg'}`;
       delta = `${bom ? '▲' : '▼'} ${Math.abs(v.delta).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% <span>vs período anterior</span>`;
     }
+    const m = v?.meta;
+    const metaHtml = m
+      ? `<div class="meta ${m.dentro ? 'ok' : 'fora'}">${m.dentro ? '✓' : '⚠'} `
+        + `meta ${esc(formatar(m.alvo, k.formato))} · `
+        + `${m.dentro ? 'dentro' : `${esc(formatar(Math.abs(m.diferenca), k.formato))} ${m.tipo === 'teto' ? 'acima' : 'abaixo'}`}`
+        + '</div>'
+      : '';
     return `
-    <div class="kpi"><div class="rotulo">${esc(k.rotulo)}</div><div class="valor" id="kpi${i}">${esc(formatar(v?.valor, k.formato))}</div><div class="${classe}" id="kpiDelta${i}">${delta}</div></div>`;
+    <div class="kpi"><div class="rotulo">${esc(k.rotulo)}</div><div class="valor" id="kpi${i}">${esc(formatar(v?.valor, k.formato))}</div><div class="${classe}" id="kpiDelta${i}">${delta}</div>${metaHtml}</div>`;
   }).join('');
 
   const graficosHtml = metasGraficos.map((g, i) => (g.tipo === 'progresso'
@@ -398,6 +431,9 @@ function gerarHtml(spec, dados) {
   .kpi .delta{font-size:13px;margin-top:6px;font-weight:600;min-height:16px}
   .kpi .delta span{color:var(--tinta2);font-weight:400}
   .kpi .delta.pos{color:#047857}.kpi .delta.neg{color:#b91c1c}
+  .kpi .meta{margin-top:8px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:5px;display:inline-block}
+  .kpi .meta.ok{background:#dcfce7;color:#166534}
+  .kpi .meta.fora{background:#fee2e2;color:#991b1b}
   .pg{font-size:13.5px}
   .pg-geral .pg-linha{margin-bottom:14px}
   .pg-geral .pg-rotulo{font-weight:700;color:var(--navy)}
@@ -496,7 +532,10 @@ const abreviar = (v, formato) => {
   const corpo = abs >= 1e6 ? (v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi'
     : abs >= 1e3 ? (v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil'
     : v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-  return formato === 'moeda' ? 'R$ ' + corpo : corpo;
+  if (formato === 'moeda') return 'R$ ' + corpo;
+  // Percentual sem o % no eixo obrigava a adivinhar a unidade.
+  if (formato === 'pct') return corpo + '%';
+  return corpo;
 };
 const ehDia = (s) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s));
 // Regra pt-BR (nunca mostrar 2026-01 ao gestor): dia ISO vira DD/MM e mes
@@ -526,7 +565,9 @@ function opcoesBase(meta, series) {
   return {
     color: PALETA,
     textStyle: { fontFamily: 'system-ui, sans-serif' },
-    grid: { left: 8, right: 16, top: varias ? 42 : 18, bottom: 8, containLabel: true },
+    // margem direita generosa: com containLabel, o ULTIMO rotulo do eixo X
+    // ainda era cortado pela borda do card (saia "R$ 1,8 n").
+    grid: { left: 8, right: 34, top: varias ? 42 : 18, bottom: 8, containLabel: true },
     legend: varias
       ? { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 8, textStyle: { color: '#475569', fontSize: 12 } }
       : { show: false },
@@ -548,11 +589,32 @@ function opcoesBase(meta, series) {
 function marcasDeCalendario(categorias) {
   const dentro = PAINEL.marcas.filter((m) => categorias.includes(m.data));
   if (dentro.length === 0) return {};
+  // Feriados proximos escreviam um POR CIMA do outro ("CarnavalCarnavalCinzas").
+  // A linha tracejada continua em todos; o NOME so aparece quando ha espaco,
+  // alternando entre duas alturas. Quem ficar sem rotulo aparece no tooltip.
+  const total = categorias.length || 1;
+  const minimoEntreRotulos = Math.max(1, Math.round(total / 14));
+  let ultimoRotulado = -Infinity;
+  let alternancia = 0;
+  const dados = dentro
+    .map((m) => ({ m, i: categorias.indexOf(m.data) }))
+    .sort((a, b) => a.i - b.i)
+    .map(({ m, i }) => {
+      const cabe = i - ultimoRotulado >= minimoEntreRotulos;
+      if (cabe) { ultimoRotulado = i; alternancia += 1; }
+      return {
+        xAxis: m.data,
+        name: m.nome,
+        label: cabe
+          ? { show: true, distance: alternancia % 2 === 0 ? 4 : 17 }
+          : { show: false },
+      };
+    });
   return { markLine: {
     symbol: 'none', silent: true,
     lineStyle: { color: '#feac0e', type: 'dashed', width: 1.5 },
     label: { formatter: (p) => p.name, color: '#92600a', fontSize: 10.5 },
-    data: dentro.map((m) => ({ xAxis: m.data, name: m.nome })),
+    data: dados,
   } };
 }
 
@@ -570,6 +632,10 @@ function montarOpcoes(meta, d) {
   }
   const opcoes = opcoesBase(meta, d.series);
   if (meta.tipo === 'barras_h') {
+    // A barra maior encosta na direita e o valor escrito na ponta era cortado
+    // ("R$ 690,7" em vez de "R$ 690,7 mil"). Serie unica desenha esse rotulo,
+    // entao precisa de folga extra.
+    if (d.series.length === 1) opcoes.grid = { ...opcoes.grid, right: 96 };
     opcoes.xAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: (v) => abreviar(v, meta.formato) } };
     opcoes.yAxis = { type: 'category', inverse: true, data: d.categorias, ...EIXOS, axisLabel: { ...EIXOS.axisLabel, width: EH_MOVEL ? 88 : 150, overflow: 'truncate' }, splitLine: { show: false } };
     opcoes.series = d.series.map((s) => ({
@@ -578,7 +644,14 @@ function montarOpcoes(meta, d) {
       label: { show: d.series.length === 1, position: 'right', formatter: (p) => abreviar(p.value, meta.formato), color: '#475569', fontSize: 11.5 },
     }));
   } else if (meta.tipo === 'barras') {
-    opcoes.xAxis = { type: 'category', data: d.categorias.map(rotuloDia), ...EIXOS, splitLine: { show: false } };
+    // Com poucas categorias (dia da semana, hora, mes) o ECharts escondia
+    // rotulos alternados — sumiam segunda, quarta e sexta do grafico semanal.
+    // Ate 14 categorias mostra TODAS; acima disso deixa ele decidir.
+    const todosOsRotulos = d.categorias.length <= 14;
+    opcoes.xAxis = { type: 'category', data: d.categorias.map(rotuloDia), ...EIXOS,
+      axisLabel: { ...EIXOS.axisLabel, interval: todosOsRotulos ? 0 : 'auto',
+        fontSize: d.categorias.length > 9 ? 10.5 : EIXOS.axisLabel.fontSize },
+      splitLine: { show: false } };
     opcoes.yAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: (v) => abreviar(v, meta.formato) } };
     opcoes.series = d.series.map((s) => ({ type: 'bar', name: s.nome, data: s.valores, barMaxWidth: 26, cursor: drillavel ? 'pointer' : 'default', itemStyle: { borderRadius: [4, 4, 0, 0] } }));
   } else { // linha
@@ -590,6 +663,21 @@ function montarOpcoes(meta, d) {
       areaStyle: d.series.length === 1 ? { opacity: 0.07 } : undefined,
       ...(si === 0 ? marcasDeCalendario(d.categorias) : {}),
     }));
+  }
+  // Linha de META: entra DEPOIS de montar as series (cada tipo de grafico
+  // redefine opcoes.series, entao aplicar antes era perder a marca).
+  if (meta.meta !== undefined && meta.meta !== null && opcoes.series && opcoes.series.length) {
+    opcoes.series[0] = { ...opcoes.series[0], markLine: {
+      symbol: 'none', silent: true, animation: false,
+      lineStyle: { color: '#dc2626', type: 'dashed', width: 1.6 },
+      label: { formatter: 'meta ' + abreviar(meta.meta, meta.formato),
+        position: 'insideEndTop', color: '#b91c1c', fontSize: 11, fontWeight: 600 },
+      ...(meta.tipo === 'barras_h'
+        ? { label: { formatter: 'meta ' + abreviar(meta.meta, meta.formato), position: 'end',
+            distance: 6, color: '#b91c1c', fontSize: 11, fontWeight: 600, rotate: 0 } }
+        : {}),
+      data: [meta.tipo === 'barras_h' ? { xAxis: meta.meta } : { yAxis: meta.meta }],
+    } };
   }
   return opcoes;
 }
