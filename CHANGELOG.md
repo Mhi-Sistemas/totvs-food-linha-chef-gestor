@@ -9,6 +9,20 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.3] — 28/09/2026
+
+### Novidades
+
+- **Quanto entrou e saiu de cada conta**: nova análise do livro caixa por conta
+  financeira (COFRE, banco, maquininha), já descontando lançamentos excluídos,
+  estornos e transferências entre contas — que apareciam duas vezes e
+  distorciam o número. Vale para o histórico que você já tem: o assistente
+  aproveita os dados baixados, sem precisar buscar de novo.
+  Uma ressalva honesta: **o sistema da TOTVS não informa o saldo das suas
+  contas**, então o assistente nunca vai dizer "você tem X em caixa" — o que
+  ele mostra é o movimento do período. O saldo você confere no ChefWeb ou no
+  banco.
+
 ## [1.0.2] — 28/09/2026
 
 ### Novidades

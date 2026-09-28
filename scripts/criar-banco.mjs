@@ -468,6 +468,13 @@ const MIGRACOES = [
   "ALTER TABLE livro_caixa ADD COLUMN plano_contas1 TEXT",
   "ALTER TABLE livro_caixa ADD COLUMN plano_contas2 TEXT",
   "ALTER TABLE livro_caixa ADD COLUMN data_lancamento TEXT",
+  // Marcas que decidem se o lancamento CONTA no movimento da conta. Sem elas,
+  // lancamento excluido, estorno e transferencia entre contas entram na soma
+  // e o numero fica errado — ver docs/dicionario-de-dados.md.
+  "ALTER TABLE livro_caixa ADD COLUMN deletado INTEGER",
+  "ALTER TABLE livro_caixa ADD COLUMN estorno INTEGER",
+  "ALTER TABLE livro_caixa ADD COLUMN transferencia INTEGER",
+  "ALTER TABLE livro_caixa ADD COLUMN compensado INTEGER",
   "ALTER TABLE venda_itens ADD COLUMN ncm TEXT",
   "ALTER TABLE venda_itens ADD COLUMN cfop TEXT",
   "ALTER TABLE venda_itens ADD COLUMN cst TEXT",
@@ -590,6 +597,22 @@ export function criarSchema(db) {
   }
   // 4) cria o que faltar (tabelas novas) e todos os indices
   db.exec(SCHEMA);
+
+  // 5) preenchimento retroativo de colunas novas a partir do payload que ja
+  // esta guardado. Evita pedir ao gestor uma nova carga so por causa de um
+  // campo que sempre esteve no json_original. So toca linhas ainda nulas,
+  // entao roda rapido depois da primeira vez.
+  try {
+    if (colunas(db, 'livro_caixa').includes('deletado')) {
+      db.exec(`UPDATE livro_caixa SET
+          deletado = CASE WHEN json_extract(json_original, '$.Deletado') IN (1, 'true') THEN 1 ELSE 0 END,
+          estorno = CASE WHEN json_extract(json_original, '$.Extorno') IN (1, 'true') THEN 1 ELSE 0 END,
+          transferencia = CASE WHEN json_extract(json_original, '$.Transfere') IN (1, 'true')
+                            OR json_extract(json_original, '$.Transferido') IN (1, 'true') THEN 1 ELSE 0 END,
+          compensado = CASE WHEN json_extract(json_original, '$.Compensado') IN (1, 'true') THEN 1 ELSE 0 END
+        WHERE deletado IS NULL AND json_original IS NOT NULL`);
+    }
+  } catch { /* melhor esforco: sem isso, so os registros novos trazem as marcas */ }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

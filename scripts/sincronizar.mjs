@@ -532,8 +532,9 @@ async function sincronizarFinanceiro(db, config, de, ate, lojaArg, qual) {
       limparPeriodo(db, config, 'livro_caixa', 'data', loja, de, ate);
       const ins = prepIns(db, config,
         `INSERT INTO livro_caixa (codigo_loja, data, descricao, natureza, tipo, valor, conta,
-          plano_contas1, plano_contas2, data_lancamento, json_original)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+          plano_contas1, plano_contas2, data_lancamento, deletado, estorno,
+          transferencia, compensado, json_original)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
       );
       // Payload real (validado): Controle, DataEmissao, DataLancamento, Entrada,
       // Saida, NomeConta, Historico1..3, PlanoContas1/2, Loja, Compensado.
@@ -552,6 +553,10 @@ async function sincronizarFinanceiro(db, config, de, ate, lojaArg, qual) {
           campo(r, 'PlanoContas1') ?? null,
           campo(r, 'PlanoContas2') ?? null,
           soDia(campo(r, 'DataLancamento', 'DataEmissao')) ?? null,
+          r.Deletado ? 1 : 0,
+          r.Extorno ? 1 : 0,
+          (r.Transfere || r.Transferido) ? 1 : 0,
+          r.Compensado ? 1 : 0,
           JSON.stringify(r)
         );
         total += 1;

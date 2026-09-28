@@ -241,6 +241,25 @@ Entradas futuras (`provisao_cartoes` por `data_deposito`) − saídas futuras
 (`contas_pagar` por `data_vencimento`, `data_pagamento IS NULL`), acumulado dia
 a dia. Destaque dias com saldo projetado negativo e concentração de vencimentos.
 
+### 3.4b Movimento por conta financeira (NÃO é saldo)
+
+**Base**: `livro_caixa`, agrupando por `conta`.
+**Fórmula**: entrou = SUM(valor) com `tipo='entrada'`; saiu = SUM(valor) com
+`tipo='saida'`; movimento = entrou − saiu.
+**Filtros obrigatórios**: `deletado = 0 AND estorno = 0 AND transferencia = 0`
+— lançamento excluído e estorno não existem para efeito de movimento, e
+transferência entre contas aparece nas duas pontas (entraria em dobro).
+Para separar o que já caiu do que está por cair, quebre por `compensado`.
+
+> ⚠️ **Isto não é o saldo da conta.** A API do ChefWeb não entrega saldo
+> (nem inicial, nem acumulado) — ver o aviso na seção 7 do dicionário de
+> dados. Apresente sempre como **"quanto entrou e saiu de cada conta no
+> período analisado"**, nunca como "saldo" ou "quanto você tem em caixa".
+> Se o gestor pedir o saldo, explique em uma frase: *"o sistema da TOTVS não
+> me passa o saldo das suas contas; o que eu consigo mostrar é tudo o que
+> entrou e saiu de cada uma no período — o saldo em si você confere no
+> ChefWeb ou no banco"*.
+
 ### 3.5 Taxa média efetiva de cartões
 ```sql
 SELECT bandeira, ROUND(SUM(valor_taxa), 2) AS taxas,

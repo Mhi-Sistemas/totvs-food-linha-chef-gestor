@@ -50,9 +50,40 @@ Entradas x saídas por dia:
 ```sql
 SELECT data, tipo, ROUND(SUM(valor), 2) AS total
 FROM livro_caixa
-WHERE data BETWEEN :de AND :ate
+WHERE data BETWEEN :de AND :ate AND deletado = 0 AND estorno = 0
 GROUP BY 1, 2 ORDER BY 1;
 ```
+
+### Movimento por conta — e por que NÃO é o saldo
+
+```sql
+SELECT conta,
+       ROUND(SUM(CASE WHEN tipo = 'entrada' THEN valor ELSE 0 END), 2) AS entrou,
+       ROUND(SUM(CASE WHEN tipo = 'saida'   THEN valor ELSE 0 END), 2) AS saiu,
+       ROUND(SUM(CASE WHEN tipo = 'entrada' THEN valor ELSE -valor END), 2) AS movimento
+FROM livro_caixa
+WHERE data BETWEEN :de AND :ate
+  AND deletado = 0 AND estorno = 0 AND transferencia = 0
+GROUP BY conta ORDER BY ABS(movimento) DESC;
+```
+
+Os três filtros são obrigatórios: lançamento excluído e estorno não existem
+para efeito de movimento, e **transferência entre contas aparece nas duas
+pontas** (sem excluí-la, o mesmo dinheiro é contado duas vezes).
+
+⚠️ **"Quanto eu tenho em caixa?" é a pergunta que este número NÃO responde.**
+O sistema da TOTVS não entrega saldo de conta — nem o inicial, nem o
+acumulado. O que existe é o movimento do período que já foi baixado; o saldo
+real exigiria saber quanto havia em cada conta antes do primeiro lançamento.
+Nunca chame isso de "saldo". Resposta pronta:
+
+> *"O sistema da TOTVS não me passa o saldo das suas contas — isso você
+> confere no ChefWeb ou no banco. O que eu consigo te mostrar é tudo o que
+> entrou e saiu de cada conta no período: [tabela]. Quer que eu detalhe alguma
+> delas por categoria ou por dia?"*
+
+Para separar o que já caiu do que ainda está por compensar, quebre por
+`compensado`.
 
 ## Cartões a receber (provisão)
 

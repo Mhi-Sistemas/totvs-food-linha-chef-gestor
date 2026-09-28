@@ -286,10 +286,20 @@ emissão (parcelamentos: emitida em junho, vence em outubro).
 |---|---|---|
 | `data` | `DataEmissao` | Dia do lançamento (campo padrão de período). `DataLancamento` (json) = quando foi digitado — ignorar. |
 | `tipo` | derivado de `Entrada`/`Saida` | 'entrada' ou 'saida'. Na API são DOIS campos de valor; aqui viram tipo + valor. |
-| `valor` | `Entrada` ou `Saida` | **Sempre positivo** — o sentido está em `tipo`. Saldo = SUM(entradas) − SUM(saídas), nunca SUM(valor). |
+| `valor` | `Entrada` ou `Saida` | **Sempre positivo** — o sentido está em `tipo`. Movimento = SUM(entradas) − SUM(saídas), nunca SUM(valor). |
 | `conta` | `NomeConta` | Conta financeira (banco, caixa interno). |
 | `natureza` | `PlanoContas1 / PlanoContas2` | Categoria do lançamento. |
-| — (json) | `Compensado`, `Extorno` | Conciliação bancária e estorno. Lançamentos com `Extorno = true` merecem cautela. |
+| `deletado` | `Deletado` | 1 = lançamento excluído. **Sempre filtre `deletado = 0`.** |
+| `estorno` | `Extorno` | 1 = estorno. Fica fora do movimento da conta (anula outro lançamento). |
+| `transferencia` | `Transfere` / `Transferido` | 1 = transferência **entre contas**. Não é receita nem despesa: move dinheiro de um lugar para outro e aparece nas duas pontas. Fora de qualquer soma de resultado. |
+| `compensado` | `Compensado` | 1 = já compensado no banco. Separa o que está disponível do que ainda vai cair. |
+
+> ⚠️ **A API NÃO entrega saldo de conta** — nem inicial, nem acumulado. O que
+> se pode calcular é o **movimento do período carregado** (entrou − saiu por
+> conta). Isso só igualaria o saldo real se o histórico estivesse completo
+> desde o primeiro dia da conta E o saldo de abertura fosse zero. **Nunca
+> apresente esse número ao gestor como "saldo"**: ele tomaria decisão de caixa
+> com valor errado. Diga "entrou e saiu de cada conta no período".
 
 ## 8. Notas fiscais (`notas_fiscais`) — origem: Fiscal/*
 
