@@ -461,7 +461,11 @@ async function sincronizarProvisao(db, config, de, ate, lojaArg) {
   const corpo = { DataInicial: dataInicioISO(de), DataFinal: dataFimISO(ate), Lojas: lojas };
   const resposta = await chamarPost(config, '/api/ProvisaoCartoes/ObterProvisaoCartoes', corpo);
   const lista = extrairLista(resposta) ?? [];
-  limparPeriodo(db, config, 'provisao_cartoes', 'data_venda', null, de, ate);
+  // Na carga historica a busca e POR LOJA: limpar o periodo inteiro aqui
+  // apagaria o que a loja anterior acabou de gravar. Com --loja, o recorte
+  // (e o registro no sync_log) tem de ser daquela loja.
+  const lojaRecorte = lojaArg !== undefined ? Number(lojaArg) : null;
+  limparPeriodo(db, config, 'provisao_cartoes', 'data_venda', lojaRecorte, de, ate);
   const ins = prepIns(db, config,
     `INSERT INTO provisao_cartoes
      (codigo_loja, data_venda, data_deposito, bandeira, valor_bruto, valor_taxa, valor_liquido, json_original)
@@ -481,7 +485,7 @@ async function sincronizarProvisao(db, config, de, ate, lojaArg) {
       JSON.stringify(r)
     );
   }
-  registrarSync(db, config, 'provisao', null, de, ate, lista.length);
+  registrarSync(db, config, 'provisao', lojaRecorte, de, ate, lista.length);
   return lista.length;
 }
 

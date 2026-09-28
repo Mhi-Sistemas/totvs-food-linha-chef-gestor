@@ -9,6 +9,29 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.2] — 28/09/2026
+
+### Novidades
+
+- **Escolher o jeito do assistente ficou mais simples**: em vez de descrever
+  num campo em branco, agora você marca as opções que combinam com você —
+  "direto ao ponto", "sem termos técnicos", "sempre comparar com antes" — e
+  pode juntar quantas quiser. A tela deixa claro que **tudo ali é opcional**.
+- **Histórico financeiro completo**: a busca do seu histórico passou a incluir
+  os **cartões a receber**, que antes só vinham do dia a dia. Junto com contas
+  a pagar, livro caixa e notas, isso é o que permite montar relatórios
+  financeiros e a DRE de meses passados.
+- **Você acompanha a busca enquanto ela roda**: a cada 5 minutos o assistente
+  informa o progresso (quanto já veio, quanto falta e o tempo estimado), em
+  vez de deixar a tela muda por longos minutos.
+
+### Correções
+
+- O convite para o comparativo de mercado era esquecido no fim da configuração
+  — agora ele acontece uma vez, e fica registrado para nunca mais se repetir.
+- Ao programar a busca da madrugada, o assistente passa a **explicar por quê**:
+  é o sistema da TOTVS que só libera dados antigos entre 23h e 7h.
+
 ## [1.0.1] — 28/09/2026
 
 ### Correções

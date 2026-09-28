@@ -48,6 +48,28 @@ const PASTA_IDENTIDADE = join(RAIZ, 'personalizados', 'identidade');
 // que permite ao assistente saber se o gestor ainda esta configurando.
 const CAMINHO_ESTADO = join(RAIZ, 'data', 'configuracao-aberta.json');
 
+// Estilos de comunicacao: o gestor COMBINA os que quiser, em vez de escrever
+// num campo aberto (ninguem sabe o que responder num campo em branco — e o
+// que ele escreve varia demais para o assistente honrar com consistencia).
+const ESTILOS_COMUNICACAO = [
+  { id: 'direto', titulo: 'Direto ao ponto',
+    ajuda: 'Só os números que importam, sem rodeio.' },
+  { id: 'explicativo', titulo: 'Me explicando os porquês',
+    ajuda: 'Diga o que o número significa e o que fazer com ele.' },
+  { id: 'sem-termo-tecnico', titulo: 'Sem termos técnicos',
+    ajuda: 'Nada de CMV, DRE, ticket médio sem explicar antes.' },
+  { id: 'com-emoji', titulo: 'Pode usar emoji',
+    ajuda: 'Deixa a conversa mais leve.' },
+  { id: 'formal', titulo: 'Mais formal',
+    ajuda: 'Me trate por senhor/senhora, sem gírias.' },
+  { id: 'informal', titulo: 'Bem informal',
+    ajuda: 'Pode falar comigo como um colega de trabalho.' },
+  { id: 'comparar-sempre', titulo: 'Sempre comparar com antes',
+    ajuda: 'Todo número vem com a variação em relação ao período anterior.' },
+  { id: 'so-o-essencial', titulo: 'Resumos curtos',
+    ajuda: 'Prefiro poucas linhas a relatórios longos.' },
+];
+
 // Segmentos atendidos pelo TOTVS Food Linha Chef — escolhem a faixa certa
 // em docs/referencias-de-mercado.md. Geralmente todas as lojas de um grupo
 // sao do mesmo segmento.
@@ -108,6 +130,14 @@ function pagina(corpo) {
   .acoes .remover:hover{background:#fdecea}
   .vazio{color:#6b7280;font-size:15px;padding:16px;border:1px dashed #cfd8dc;border-radius:8px;text-align:center}
   .rodape{margin-top:20px;font-size:12px;color:#9aa5ab;text-align:center}
+  .opcional{font-weight:400;color:#6b7280;font-size:13px}
+  .escolhas{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:6px}
+  .escolha{display:flex;gap:10px;align-items:flex-start;margin:0;padding:11px 13px;border:1px solid #cfd8dc;border-radius:6px;font-weight:400;cursor:pointer;background:#fff}
+  .escolha:hover{border-color:var(--hover);background:#f7fafb}
+  .escolha input{width:auto;margin:2px 0 0;flex:none;accent-color:var(--hover)}
+  .escolha strong{display:block;font-size:14px;color:var(--navy)}
+  .escolha small{display:block;color:#6b7280;font-size:12.5px;margin-top:2px;line-height:1.35}
+  .escolha:has(input:checked){border-color:var(--hover);background:#eef5f8;box-shadow:inset 0 0 0 1px var(--hover)}
   /* Espera do teste de credenciais: a TOTVS exige 30s entre chamadas, e a
      validacao faz varias — sem isto a tela fica parada e parece travada. */
   .espera{display:none;margin-top:22px;border:1px solid var(--navy);border-radius:8px;padding:18px;background:#f0f6f9}
@@ -175,25 +205,33 @@ function telaLista({ mensagemOk = null, mensagemErro = null } = {}) {
 
 function telaPersonalizar({ mensagemOk = null, mensagemErro = null } = {}) {
   const p = carregarPerfil();
+  const estilosMarcados = Array.isArray(p.estilo) ? p.estilo : [];
   const temLogo = existsSync(join(PASTA_IDENTIDADE, 'logo.png')) || existsSync(join(PASTA_IDENTIDADE, 'logo.jpg'));
   return pagina(`
   ${mensagemOk ? `<div class="ok">✅ ${esc(mensagemOk)}</div>` : ''}
   ${mensagemErro ? `<div class="erro">⚠️ ${esc(mensagemErro)}</div>` : ''}
   <h1>🎨 Personalizar o assistente</h1>
-  <p class="sub">Deixe o assistente com a cara da sua empresa — tudo opcional.</p>
+  <p class="sub"><strong>Tudo nesta tela é opcional.</strong> Serve para deixar o
+  assistente com a sua cara — você pode pular e configurar depois, a qualquer
+  momento, é só pedir na conversa.</p>
   <form method="POST" action="/salvar-personalizacao" enctype="multipart/form-data">
     <input type="hidden" name="tf" value="${TOKEN_FORMULARIO}">
 
-    <label for="assistente_nome">Como você quer chamar o assistente?</label>
+    <label for="assistente_nome">Como você quer chamar o assistente? <span class="opcional">(opcional)</span></label>
     <input id="assistente_nome" name="assistente_nome" value="${esc(p.assistente_nome ?? '')}"
       placeholder="ex.: Chef, Sofia, Assistente da Rede Centro">
 
-    <label for="comunicacao">Como prefere que ele se comunique?</label>
+    <label>Como prefere que ele se comunique? <span class="opcional">(opcional — marque quantas quiser)</span></label>
+    <div class="escolhas">
+      ${ESTILOS_COMUNICACAO.map((e) => `
+      <label class="escolha">
+        <input type="checkbox" name="estilo" value="${esc(e.id)}"${estilosMarcados.includes(e.id) ? ' checked' : ''}>
+        <span><strong>${esc(e.titulo)}</strong><small>${esc(e.ajuda)}</small></span>
+      </label>`).join('')}
+    </div>
+    <label for="comunicacao">Mais alguma preferência? <span class="opcional">(opcional)</span></label>
     <input id="comunicacao" name="comunicacao" value="${esc(p.comunicacao ?? '')}"
-      placeholder="ex.: direto ao ponto, sem formalidade; ou detalhado, me explicando os porquês">
-    <details><summary>Exemplos</summary>
-      <p>"Direto ao ponto, só os números que importam" · "Me explique como se eu
-      não soubesse nada de finanças" · "Pode usar emoji" · "Me trate por você".</p></details>
+      placeholder="ex.: me chame pelo primeiro nome; comece sempre pelo faturamento do dia">
 
     <label for="logo">Logomarca da sua empresa <span style="font-weight:400;color:#6b7280">(PNG ou JPG${temLogo ? ' — já existe uma; enviar outra substitui' : ''})</span></label>
     <input id="logo" name="logo" type="file" accept="image/png,image/jpeg">
@@ -400,7 +438,11 @@ function extrairMultipart(corpo, contentType) {
       if (nome && arquivo !== undefined) {
         if (arquivo) arquivos.push({ nome, arquivo, tipo, dados });
       } else if (nome) {
-        campos[nome] = dados.toString('utf8');
+        // Campo repetido (varios checkboxes com o mesmo name) vira LISTA —
+        // sobrescrever guardaria so a ultima marcacao.
+        const valor = dados.toString('utf8');
+        if (nome in campos) campos[nome] = [campos[nome]].flat().concat(valor);
+        else campos[nome] = valor;
       }
     }
     pos = proximo;
@@ -458,10 +500,20 @@ const servidor = createServer(async (req, res) => {
       if (campos.tf !== TOKEN_FORMULARIO) {
         return responder(telaPersonalizar({ mensagemErro: 'Sessão inválida. Recarregue a página.' }), 403);
       }
+      // Multipart repete o campo quando ha varias marcadas: extrairMultipart
+      // devolve `estilo` como lista quando isso acontece.
+      const marcados = [campos.estilo ?? []].flat()
+        .filter((id) => ESTILOS_COMUNICACAO.some((e) => e.id === id));
       const perfil = {
         ...carregarPerfil(),
         assistente_nome: (campos.assistente_nome ?? '').trim() || null,
-        comunicacao: (campos.comunicacao ?? '').trim() || null,
+        estilo: marcados,
+        // Texto pronto para o assistente honrar, montado a partir das escolhas
+        // + o complemento livre. E o que ele le no inicio de cada conversa.
+        comunicacao: [
+          ...marcados.map((id) => ESTILOS_COMUNICACAO.find((e) => e.id === id).titulo.toLowerCase()),
+          (campos.comunicacao ?? '').trim(),
+        ].filter(Boolean).join('; ') || null,
         atualizado_em: new Date().toISOString(),
       };
       mkdirSync(join(RAIZ, 'data'), { recursive: true });

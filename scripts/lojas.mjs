@@ -659,6 +659,26 @@ async function coletarDominio(db, args, dominio, estado) {
   const lojasSemAcesso = estado.lojasSemAcesso;
   const mesesComFalha = estado.mesesComFalha;
   let freiou = false;
+
+  // BOLETIM DE PROGRESSO a cada 5 minutos. A coleta passa longos minutos
+  // aparentemente parada (a TOTVS exige 30s entre buscas): sem um sinal
+  // periodico, quem acompanha o log — gestor ou assistente — nao distingue
+  // "andando devagar" de "travado".
+  const inicioDominio = Date.now();
+  const boletim = setInterval(() => {
+    const feitas = ok + vazios + erros + pulados;
+    const restantes = fila.length - feitas;
+    const minCorridos = Math.max(1, Math.round((Date.now() - inicioDominio) / 60000));
+    const porMinuto = feitas / minCorridos;
+    const faltam = porMinuto > 0 ? Math.round(restantes / porMinuto) : null;
+    console.log(`[${dominio}] progresso: ${feitas} de ${fila.length} busca(s) `
+      + `(${Math.round((feitas / fila.length) * 100)}%) — ${ok} com dados, `
+      + `${vazios} sem movimento${erros ? `, ${erros} com erro` : ''}`
+      + `${faltam !== null ? `; faltam ~${faltam} min` : ''}.`);
+  }, 5 * 60 * 1000);
+  boletim.unref?.();
+
+  try {
   for (const [i, t] of fila.entries()) {
     if (estado.pararTudo) break;
     // O intervalo do limite de requisicoes e POR DOMINIO e depende da hora
@@ -785,6 +805,7 @@ async function coletarDominio(db, args, dominio, estado) {
       await esperar(intervaloMs);
     }
   }
+  } finally { clearInterval(boletim); }
   estado.ok += ok;
   estado.vazios += vazios;
   estado.erros += erros;

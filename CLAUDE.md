@@ -271,7 +271,11 @@ projeto e a aplica sozinha. Só se fala nisso com o gestor quando algo mudou:
 - **Ao publicar qualquer evolução do projeto** (para quem desenvolve): toda
   mudança enviada precisa de uma entrada nova no `CHANGELOG.md` e do aumento
   da versão no `package.json` — sem isso a atualização automática não enxerga
-  nem explica a mudança.
+  nem explica a mudança. E **a versão nova nunca altera o que o gestor já
+  configurou**: `data/`, `personalizados/` e `relatorios/` (credenciais,
+  banco, metas, memória, análises e painéis dele, identidade visual e
+  relatórios gerados) ficam fora da atualização; mudanças de formato têm de
+  ser retrocompatíveis, e as do banco entram como migração idempotente.
 
 ## Alertas ao gestor (obrigatório)
 

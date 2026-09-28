@@ -69,6 +69,14 @@ digitar credenciais no chat nem ouvir falar de arquivos técnicos.
    caixa, financeiro, notas, catálogo, estoque, clientes. Leva alguns minutos;
    avise o gestor: *"estou buscando seus dados, um instante"*.
 
+4b. **Acompanhe a coleta e vá contando.** A carga inicial leva alguns minutos
+   (a TOTVS pede ~30s entre buscas). **Não deixe o gestor no vazio**: a cada
+   poucos minutos, diga em que pé está — *"já trouxe suas vendas e o caixa,
+   estou no financeiro agora"*. Se a coleta estiver rodando em segundo plano,
+   o próprio log traz um boletim de progresso a cada 5 minutos (percentual,
+   quantas buscas faltam e a estimativa de tempo); use-o para informar o
+   gestor no mesmo ritmo, sem que ele precise perguntar.
+
 5. **Diga a ele o que já está disponível.** O comando termina listando isso;
    traduza em oportunidade, não em inventário: *"já tenho suas vendas dos
    últimos 16 dias, seu caixa, suas contas a pagar e seu estoque de hoje — já
@@ -107,6 +115,20 @@ digitar credenciais no chat nem ouvir falar de arquivos técnicos.
    gestor** ("são 240 buscas, cerca de 40 minutos por madrugada; seu histórico
    fica pronto em uns 3 dias") e **agende** — nunca peça para ele rodar de
    madrugada (veja "⏳ Agende a coleta noturna" na skill `sincronizar`).
+
+   **Explique POR QUE precisa ser de madrugada** — sem isso, agendar uma tarefa
+   noturna no computador dele parece arbitrário e invasivo:
+   > *"O sistema da TOTVS só libera a busca de vendas antigas entre 23h e 7h —
+   > é regra deles, para não sobrecarregar o servidor no horário em que as
+   > lojas estão vendendo. Por isso eu programo a busca para a madrugada: ela
+   > roda sozinha, sem atrapalhar o seu dia, e de noite ainda é 3× mais rápida.
+   > O que preciso de você é só deixar o computador ligado e sem suspensão."*
+
+   Diga também o que **não** depende da madrugada: o financeiro (contas a
+   pagar, livro caixa, cartões a receber, notas) e os fechamentos de caixa não
+   têm essa restrição e são buscados de dia — então os relatórios financeiros
+   do histórico ficam prontos bem antes das vendas.
+
    A carga se conduz sozinha a partir daí: a rotina diária retoma o que faltou,
    e `lojas.mjs progresso --grupo <id> --abrir` mostra o andamento sempre que
    ele perguntar "como está a carga?".
@@ -169,7 +191,16 @@ digitar credenciais no chat nem ouvir falar de arquivos técnicos.
    A meta é o gestor sair da configuração com **2 ou 3 atalhos do jeito dele
    já funcionando** — nada fixa a capacidade como vê-la pronta no primeiro dia.
 
-9. **Convide para a lista de espera do benchmark** (opcional — nunca insista).
+9. **Convide para a lista de espera do benchmark — UMA ÚNICA VEZ, e não deixe
+   de fazer**: este é o passo que mais se esquece, e é o último do onboarding.
+   Confira antes com `node --no-warnings scripts/benchmark.mjs situacao`:
+   - `não convidado ainda` → faça o convite agora (fala pronta abaixo);
+   - qualquer outra resposta → **não toque no assunto**.
+   Com o **sim**, ABRA a página (não basta mencionar):
+   `node --no-warnings scripts/benchmark.mjs lista-espera`.
+   Logo depois — tanto faz se ele aceitou ou recusou — registre para nunca
+   mais convidar: `node --no-warnings scripts/benchmark.mjs convite-feito`
+   (acrescente `--aceitou` quando ele entrar).
    Fala pronta: *"já pensou comparar seu CMV e seu ticket médio com empresas
    parecidas com a sua — da sua cidade ou de outros estados? Estamos
    construindo esse benchmark, colaborativo e gratuito: quando chegarmos a

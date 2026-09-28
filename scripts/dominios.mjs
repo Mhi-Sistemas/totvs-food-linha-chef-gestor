@@ -13,9 +13,10 @@
 // - nome:     como o gestor ve o dominio (relatorios, alertas)
 // - tipo:     'periodo'  = tem historico por data (busca por mes/dia)
 //             'cadastro' = fotografia do estado atual (vale o "atualizado em")
-// - historico: entra na CARGA HISTORICA (`lojas.mjs coletar`)? Dominios de
-//             periodo sem historico (ex.: provisao, que a API entrega por
-//             grupo e sem recorte por loja) ficam so na rotina diaria.
+// - historico: entra na CARGA HISTORICA (`lojas.mjs coletar`)? Todo dominio
+//             de periodo entra: sem o historico financeiro (contas a pagar,
+//             livro caixa, cartoes a receber, notas de entrada) nao ha como
+//             montar DRE nem relatorio financeiro de periodo passado.
 // - janelaNoturna: a API so libera periodos antigos entre 23h e 07h
 //             (hoje, restricao conhecida apenas das vendas).
 
@@ -23,7 +24,7 @@ export const DOMINIOS = [
   { id: 'vendas', nome: 'Vendas', tipo: 'periodo', historico: true, janelaNoturna: true },
   { id: 'fechamentos', nome: 'Fechamentos de caixa', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'sangrias', nome: 'Sangrias', tipo: 'periodo', historico: true, janelaNoturna: false },
-  { id: 'provisao', nome: 'Cartões a receber', tipo: 'periodo', historico: false, janelaNoturna: false },
+  { id: 'provisao', nome: 'Cartões a receber', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'contas-pagar', nome: 'Contas a pagar', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'livro-caixa', nome: 'Livro caixa', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'notas-venda', nome: 'Notas de venda', tipo: 'periodo', historico: true, janelaNoturna: false },

@@ -203,6 +203,46 @@ await passoAsync('página de configuração sobrevive a quem a abriu', async () 
   }
 });
 
+// 5e. ATUALIZAR NAO PODE APAGAR O QUE E DO GESTOR. A atualizacao automatica
+// roda sozinha, em silencio: se um dia ela sobrescrever as personalizacoes,
+// as metas, os relatorios gerados ou a memoria do assistente, o gestor perde
+// o que construiu e ninguem percebe. Este teste fixa a regra.
+passo('atualização preserva o que é do gestor', () => {
+  const meus = [
+    ['data', 'perfil-agente.json', '{"assistente_nome":"Sofia"}'],
+    ['data', 'memoria/aprendizados.md', '# Preferência dele'],
+    ['data', 'conexoes.json', null], // ja existe: nao pode ser tocado
+    ['personalizados', 'minha-analise.md', '# Minha análise'],
+    ['personalizados', 'identidade/identidade.json', '{"cabecalho":"#123456"}'],
+    ['relatorios', 'paineis/meu-painel.html', '<html>meu painel</html>'],
+  ];
+  for (const [pasta, rel, conteudo] of meus) {
+    if (conteudo === null) continue;
+    const alvo = join(RAIZ, pasta, rel);
+    mkdirSync(dirname(alvo), { recursive: true });
+    writeFileSync(alvo, conteudo, 'utf8');
+  }
+  const antes = new Map(meus.filter(([, , c]) => c !== null)
+    .map(([p, rel]) => [join(p, rel), readFileSync(join(RAIZ, p, rel), 'utf8')]));
+
+  // A lista de exclusao do atualizador e o que garante isso na pratica.
+  const fonte = readFileSync(join(RAIZ, 'scripts', 'atualizar.mjs'), 'utf8');
+  const naoCopiar = /const NAO_COPIAR = new Set\(\[([^\]]*)\]\)/.exec(fonte)?.[1] ?? '';
+  for (const pasta of ['data', 'relatorios', 'personalizados']) {
+    espera(naoCopiar.includes(`'${pasta}'`),
+      `"${pasta}" precisa estar fora da cópia da atualização, senão o gestor perde o que é dele`);
+  }
+
+  // A preparacao que a atualizacao reexecuta (instalar + migracoes) tambem
+  // nao pode encostar nesses arquivos.
+  const r = rodar([join(RAIZ, 'scripts', 'instalar.mjs'), '--sem-atalho']);
+  espera(r.codigo === 0, r.saida.slice(0, 200));
+  for (const [rel, conteudo] of antes) {
+    espera(readFileSync(join(RAIZ, rel), 'utf8') === conteudo,
+      `"${rel}" foi alterado pela preparação da nova versão`);
+  }
+});
+
 // 6. Dados de exemplo direto no banco (para consultar/exportar/backup)
 await passoAsync('semear vendas de exemplo', async () => {
   const { abrirBanco, criarSchema } = await import('../scripts/criar-banco.mjs');

@@ -37,6 +37,10 @@ const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PASTA_DADOS = join(RAIZ, 'data');
 const CAMINHO_PENDENTES = join(PASTA_DADOS, 'lista-espera-pendente.json');
 const CAMINHO_ENVIADO = join(PASTA_DADOS, 'lista-espera-enviado.json');
+// Registro de que o convite JA FOI FEITO — com sim ou com nao. O convite e
+// de UMA VEZ: repetir vira insistencia, e ninguem gosta de ser cobrado duas
+// vezes pela mesma coisa.
+const CAMINHO_CONVITE = join(PASTA_DADOS, 'lista-espera-convite.json');
 
 // URL do webhook da lista de espera (definida pela mantenedora do projeto).
 const WEBHOOK_LISTA_ESPERA = 'https://flowhook.oruzz.com.br/webhook/b49c1b43-6321-48b7-a366-fb8f1e2bb320';
@@ -260,9 +264,21 @@ try {
   } else if (acao === 'situacao') {
     if (existsSync(CAMINHO_ENVIADO)) console.log('inscrito');
     else if (existsSync(CAMINHO_PENDENTES)) console.log('pendente de envio');
-    else console.log('não inscrito');
+    else if (existsSync(CAMINHO_CONVITE)) console.log('já convidado — não quis; NÃO convidar de novo');
+    else console.log('não convidado ainda');
+  } else if (acao === 'convite-feito') {
+    // Chamado pelo assistente logo apos convidar, tenha o gestor aceitado ou
+    // nao: e o que impede o convite de reaparecer em conversas futuras.
+    mkdirSync(PASTA_DADOS, { recursive: true });
+    writeFileSync(CAMINHO_CONVITE, `${JSON.stringify({
+      convidado_em: new Date().toISOString(),
+      resposta: process.argv[3] === '--aceitou' ? 'aceitou' : 'não quis',
+    }, null, 2)}
+`, 'utf8');
+    console.log('Convite registrado: não será feito de novo.');
   } else {
-    console.error('Uso: lista-espera --empresa "..." --nome "..." --telefone "..." --email "..." | enviar-pendentes | situacao');
+    console.error('Uso: lista-espera [--empresa ... --nome ... --telefone ... --email ...] | '
+      + 'enviar-pendentes | situacao | convite-feito [--aceitou]');
     process.exitCode = 1;
   }
 } catch (erro) {

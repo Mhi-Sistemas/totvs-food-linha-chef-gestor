@@ -17,7 +17,16 @@ Mac). **Nunca cole senhas, número de série ou dados de clientes na issue.**
    compatível com **Windows e macOS**.
 3. Teste com dados reais quando possível, e nunca versione dados de cliente —
    as pastas `data/`, `relatorios/` e `personalizados/` ficam fora do Git.
-4. **Changelog e versão são obrigatórios**: toda mudança publicada precisa de
+4. **Nunca mexa no que é do gestor.** A atualização é automática e silenciosa:
+   uma versão nova NÃO pode apagar nem alterar o que ele já configurou —
+   `data/` (credenciais, banco, metas, memória do assistente, perfil),
+   `personalizados/` (análises, painéis e indicadores dele, identidade visual)
+   e `relatorios/` (o que já foi gerado). Essas pastas ficam fora da cópia da
+   atualização e fora do Git. Mudança de formato nesses arquivos precisa ser
+   **retrocompatível** ou vir com migração que preserve o conteúdo; mudança de
+   schema do banco entra como migração idempotente em `criar-banco.mjs`, nunca
+   recriando tabela. O teste de fumaça cobre essa regra.
+5. **Changelog e versão são obrigatórios**: toda mudança publicada precisa de
    uma entrada no `CHANGELOG.md` (escrita em linguagem de gestor) e do aumento
    da versão no `package.json` (correção = terceiro número, novidade =
    segundo). É isso que alimenta a atualização automática dos assistentes já
