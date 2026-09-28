@@ -9,6 +9,24 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.4] — 28/09/2026
+
+### Novidades
+
+- **Os gráficos de meios de pagamento agora mostram o tipo, não o nome solto.**
+  O ChefWeb deixa você nomear as formas como quiser, e é comum ter dezenas
+  ("PIX STONE", "MASTER VISA DEBITO INFINITY", "IFOOD ONLINE") — o gráfico
+  virava uma lista ilegível. Agora ele mostra as categorias (Pix, Crédito,
+  Débito, Dinheiro, iFood...) e **você clica em uma para ver quais formas
+  estão dentro dela**.
+- **O agrupamento automático ficou mais esperto**: aplicativos de delivery
+  (iFood, AiQFome, Rappi...) passaram a ter categoria própria em vez de serem
+  confundidos com cartão de crédito — num caso real isso colocava o maior
+  recebimento da casa na categoria errada. E bandeiras sem o tipo no nome
+  (Mastercard, Visa, Visa Electron, Maestro) são classificadas pela convenção
+  do mercado. O que continuar ambíguo aparece marcado para **você confirmar**,
+  em vez de ser adivinhado.
+
 ## [1.0.3] — 28/09/2026
 
 ### Correções

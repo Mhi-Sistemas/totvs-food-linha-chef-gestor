@@ -22,6 +22,16 @@ import { abrirBanco, criarSchema } from './criar-banco.mjs';
 // (veio invertido vs. a documentação nos dados reais); o texto é.
 export function sugerirCategoria(descricao, tipoCartao) {
   const d = `${descricao ?? ''} ${tipoCartao ?? ''}`.toUpperCase();
+  // MARKETPLACE VEM PRIMEIRO e é categoria própria: "IFOOD" não é crédito,
+  // "DEBITO IFOOD" não é débito. Quem paga pelo app paga ao marketplace, e o
+  // dinheiro chega como repasse — misturar com cartão distorce a análise
+  // inteira (num grupo real o iFood era o MAIOR meio de pagamento da casa e
+  // a sugestão o classificava como "Crédito").
+  const marketplace = /IFOOD|AIQFOME|RAPPI|UBER ?EATS|99 ?FOOD|DELIVERY DIRETO|GOOMER|ANOTA ?AI/.exec(d);
+  if (marketplace) {
+    const nome = { IFOOD: 'iFood', AIQFOME: 'AiQFome', RAPPI: 'Rappi' }[marketplace[0].replace(/\s/g, '')];
+    return nome ?? 'Delivery/marketplace';
+  }
   if (/DINHEIRO|ESPECIE/.test(d)) return 'Dinheiro';
   if (/PIX/.test(d)) return 'Pix';
   if (/CR[ÉE]D/.test(d)) return 'Crédito';
@@ -29,7 +39,13 @@ export function sugerirCategoria(descricao, tipoCartao) {
   if (/VALE|VR |VA |ALELO|SODEXO|TICKET|PLURXX|BEN VIS|REFEI[ÇC]/.test(d)) return 'Vale-refeição';
   if (/FATUR|PRAZO|CONV[ÊE]NIO|BOLETO|NOTA|ASSINAD/.test(d)) return 'Faturado';
   if (/CHEQUE/.test(d)) return 'Cheque';
-  if (/CART[ÃA]O|VISA|MASTER|ELO|AMEX|HIPER/.test(d)) return 'Cartão (verificar créd/déb)';
+  if (/CORTESIA|VOUCHER|BRINDE/.test(d)) return 'Cortesia';
+  // Bandeiras sem a palavra credito/debito no nome. Convencao do mercado
+  // (confirmada pelo usuario): Mastercard e Visa sao credito; Visa Electron,
+  // Maestro e RedeShop sao debito. O gestor confirma no onboarding.
+  if (/ELECTRON|MAESTRO|REDE ?SHOP/.test(d)) return 'Débito';
+  if (/MASTERCARD|^VISA$|VISA /.test(d)) return 'Crédito';
+  if (/CART[ÃA]O|VISA|MASTER|ELO|AMEX|HIPER/.test(d)) return 'Cartão (confirme com o gestor)';
   return 'Outros';
 }
 

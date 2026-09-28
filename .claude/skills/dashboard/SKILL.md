@@ -62,6 +62,25 @@ Regras da especificação:
   `MIN(strftime('%w', d))`), nunca exiba 0–6. Meses: o gerador converte
   `AAAA-MM` para "jan/26" sozinho, mas nunca escreva 2026-01 em título,
   legenda ou observação. Textos com acentuação e gramática corretas.
+- **💳 Meios de pagamento: SEMPRE por categoria, nunca por forma solta.** O
+  nome da forma é livre no ChefWeb e um grupo real chega a ter 45 delas
+  ("PIX STONE", "MASTER VISA DEBITO INFINITY", "IFOOD ONLINE"): um gráfico por
+  forma é ilegível e a maior parte do valor some numa fatia "Outros". Monte
+  com `niveis` — **categoria no 1º nível, formas daquela categoria no 2º**:
+
+  ```json
+  "niveis": [
+    { "sql": "SELECT COALESCE(c.categoria,'Sem categoria') AS categoria, ROUND(SUM(p.valor_efetivo),2) AS valor FROM venda_pagamentos p JOIN vendas v ON v.chave_venda=p.chave_venda AND v.conexao=p.conexao LEFT JOIN formas_pagamento_categorias c ON c.descricao=p.descricao WHERE ... GROUP BY 1 ORDER BY 2 DESC" },
+    { "sql": "SELECT p.descricao AS forma, ROUND(SUM(p.valor_efetivo),2) AS valor FROM venda_pagamentos p JOIN vendas v ON ... LEFT JOIN formas_pagamento_categorias c ON c.descricao=p.descricao WHERE COALESCE(c.categoria,'Sem categoria')='{{pai}}' AND ... GROUP BY 1 ORDER BY 2 DESC" }
+  ]
+  ```
+
+  **Se as categorias ainda não estiverem definidas, pare e defina antes**
+  (`categorias-pagamento.mjs listar` para conferir; `sugerir` → apresente a
+  proposta ao gestor → `definir`). Marketplace é categoria própria — iFood,
+  AiQFome e afins **não são crédito**; "DEBITO IFOOD" é iFood, não débito.
+  Mastercard e Visa são crédito; Visa Electron, Maestro e RedeShop são débito.
+  O que restar ambíguo, **pergunte ao gestor** — não classifique no escuro.
 - **Tipos**: `linha` (evolução no tempo; ganha marcas de feriado/evento),
   `barras` (dia da semana/hora), `barras_h` (rankings, maior no topo),
   `rosca` (composição; máx. 6 fatias, resto vira "Outros" sozinho).
@@ -96,10 +115,9 @@ Regras da especificação:
   **Aplique drill-down automaticamente, sem o gestor pedir**, sempre que a
   dimensão tiver hierarquia natural: **grupo → subgrupo → produto** (mix de
   vendas — o padrão preferido ao "top produtos" plano), **categoria de
-  pagamento → forma de pagamento** (quando as categorias já foram
-  configuradas), **plano de contas 1 → plano 2** (financeiro), **rede → loja**
-  (quando não houver filtro por loja), **dia → produto do dia** quando fizer
-  sentido. Cada nível é pré-calculado na geração; limite o último nível
+  pagamento → forma de pagamento**, **plano de contas 1 → plano 2**
+  (financeiro), **rede → loja** (quando não houver filtro por loja),
+  **dia → produto do dia** quando fizer sentido. Cada nível é pré-calculado na geração; limite o último nível
   (`LIMIT`) para o arquivo não inchar. O gestor navega clicando e volta pela
   trilha "Início ▸ ...".
 - Regras de ouro dos dados: `cancelada = 0`, `venda_itens.status = 1`,
