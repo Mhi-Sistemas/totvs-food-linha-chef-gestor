@@ -104,7 +104,10 @@ assistente"*, *"vou preparar seu computador"* — nunca "clonar o repositório",
    **grupos de lojas** (um por número de série). A página testa cada acesso,
    grava em `data/conexoes.json` e cria o banco. Serve tanto para o primeiro
    uso quanto para **acrescentar um grupo ou loja novos depois**. O comando
-   aguarda (até 15 min) e encerra quando o gestor clica em "Concluir".
+   **devolve o controle na hora** e a página fica no ar num processo próprio,
+   pelo tempo que o gestor precisar; acompanhe com `configurar.mjs status`.
+   Avise que o teste das credenciais leva de 1 a 2 minutos (intervalo exigido
+   pela TOTVS) e que ele não deve fechar a janela nesse tempo.
 2. `node --no-warnings scripts/testar-conexao.mjs [--grupo <id>]` revalida os
    acessos já salvos.
 3. `node --no-warnings scripts/criar-banco.mjs` cria o banco local `data/chef.db` (SQLite).

@@ -9,6 +9,24 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.1] — 28/09/2026
+
+### Correções
+
+- **A página de configuração sumia no meio do caminho.** Ela era encerrada
+  junto com o comando que a abriu, e quem estava preenchendo com calma — ou
+  procurando a logomarca no computador — encontrava a janela sem resposta.
+  Agora ela fica no ar pelo tempo que você precisar, até clicar em "Concluir".
+- **A tela parecia travada ao salvar o acesso.** O sistema da TOTVS pede um
+  intervalo entre as consultas, então testar usuário, senha e número de série
+  leva de 1 a 2 minutos — e a página não dizia nada. Agora mostra o que está
+  acontecendo, com barra de progresso e o aviso de não fechar a janela.
+- **"Personalizar o assistente" não aparecia na primeira configuração**: o
+  botão só existia depois de cadastrar o primeiro acesso. Agora está nas duas
+  telas.
+- Ao concluir, a página avisa que vai se encerrar — antes, os botões
+  simplesmente paravam de responder e parecia defeito.
+
 ## [1.0.0] — 28/09/2026
 
 **Lançamento oficial.** O assistente de gestão para o TOTVS Food Linha Chef

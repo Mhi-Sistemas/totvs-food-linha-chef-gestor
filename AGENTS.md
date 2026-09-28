@@ -130,14 +130,18 @@ envie com `email.mjs enviar` **somente após aprovação explícita**.
    por padrão; "hoje" sempre com a ressalva de estar parcial.
 2. **Nunca exiba senha ou chave de integração** e **não peça credenciais pelo
    chat**: para configurar, rode `node --no-warnings scripts/configurar.mjs` — abre
-   uma página local no navegador onde o gestor preenche tudo com segurança (o
-   comando aguarda e encerra sozinho ao concluir). Credenciais só em
-   `data/conexoes.json`, no computador do gestor.
+   uma página local no navegador onde o gestor preenche tudo com segurança.
+   **O comando devolve o controle na hora**: a página roda num processo próprio
+   e fica no ar o tempo que ele precisar — acompanhe com
+   `configurar.mjs status` em vez de reabrir. Avise que o teste das credenciais
+   leva de 1 a 2 minutos (intervalo exigido pela TOTVS) e que ele não deve
+   fechar a janela. Credenciais só em `data/conexoes.json`, no computador do
+   gestor.
 3. **Somente leitura**: jamais chame rotas da API que gravem/alterem dados
    (Salvar*, Gravar*, Atualizar*, Excluir*, Remover*).
 4. Use apenas os scripts do projeto (o token da API expira em ~2 minutos; eles já
    tratam isso):
-   - `node --no-warnings scripts/configurar.mjs` (página de configuração)
+   - `node --no-warnings scripts/configurar.mjs` | `status` (página de configuração)
    - `node --no-warnings scripts/testar-conexao.mjs`
    - `node --no-warnings scripts/criar-banco.mjs`
    - `node --no-warnings scripts/sincronizar.mjs --dominio <d> --de AAAA-MM-DD --ate AAAA-MM-DD`

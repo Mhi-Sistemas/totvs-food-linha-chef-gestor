@@ -159,6 +159,50 @@ passo('carga inicial mostra o que já está disponível', () => {
     'ação inválida deveria sair com erro');
 });
 
+// 5d. Pagina de configuracao: precisa SOBREVIVER a quem a abriu. O assistente
+// que dispara o comando costuma ter limite de poucos minutos por comando; se a
+// pagina morresse junto, ela sumiria no meio da configuracao (aconteceu num
+// teste real de onboarding). Por isso roda desanexada e se acompanha por
+// `status`.
+await passoAsync('página de configuração sobrevive a quem a abriu', async () => {
+  const cfg = join(RAIZ, 'scripts', 'configurar.mjs');
+  const estado = join(DADOS, 'configuracao-aberta.json');
+  try {
+    const abrir = rodar([cfg, '--sem-navegador']);
+    espera(abrir.codigo === 0, abrir.saida.slice(0, 200));
+    espera(/Página de configuração aberta: http:\/\/127\.0\.0\.1:\d+/.test(abrir.saida),
+      `deveria anunciar o endereço: ${abrir.saida.slice(0, 200)}`);
+    espera(existsSync(estado), 'deveria registrar o estado para o assistente acompanhar');
+
+    // O processo que abriu ja terminou: a pagina tem de continuar respondendo.
+    const { endereco } = JSON.parse(readFileSync(estado, 'utf8'));
+    const r = await fetch(endereco, { signal: AbortSignal.timeout(10_000) });
+    espera(r.status === 200, `a página deveria responder 200, veio ${r.status}`);
+    const html = await r.text();
+    espera(/Personalizar o assistente/.test(html),
+      'a personalização precisa estar acessível já na primeira tela');
+
+    // Tela de credenciais (aqui ja ha acessos, entao a raiz mostra a lista).
+    const rc = await fetch(`${endereco}novo`, { signal: AbortSignal.timeout(10_000) });
+    const htmlCred = await rc.text();
+    espera(/Testando seu acesso no sistema da TOTVS/.test(htmlCred),
+      'a tela de credenciais deveria avisar que o teste demora');
+    espera(/Personalizar o assistente/.test(htmlCred),
+      'a personalização precisa estar acessível também na tela de credenciais');
+
+    espera(rodar([cfg, 'status']).saida.includes('ABERTA'), 'status deveria dizer que está aberta');
+    // Chamar de novo nao pode abrir uma segunda pagina.
+    espera(/já está aberta/.test(rodar([cfg, '--sem-navegador']).saida),
+      'não deveria abrir uma segunda página');
+  } finally {
+    try {
+      const { pid } = JSON.parse(readFileSync(estado, 'utf8'));
+      process.kill(pid);
+    } catch { /* ja encerrou */ }
+    try { rmSync(estado); } catch { /* ok */ }
+  }
+});
+
 // 6. Dados de exemplo direto no banco (para consultar/exportar/backup)
 await passoAsync('semear vendas de exemplo', async () => {
   const { abrirBanco, criarSchema } = await import('../scripts/criar-banco.mjs');

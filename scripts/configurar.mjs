@@ -13,13 +13,24 @@
 // grupos de lojas contratados separadamente — e pode acrescentar novos a
 // qualquer momento, muito depois da configuração inicial.
 //
-// Uso: node --no-warnings scripts/configurar.mjs
-// Encerra com código 0 quando o gestor clica em "Concluir", ou 1 se ninguém
-// concluir em 15 minutos.
+// A PÁGINA PRECISA SOBREVIVER AO AGENTE. Configurar leva o tempo do gestor:
+// achar o número de série no ChefWeb, escolher a logomarca, ler as
+// explicações. O assistente que dispara este comando costuma ter um limite
+// de poucos minutos por comando — e, ao atingi-lo, mataria o servidor e a
+// página morreria no meio da configuração. Por isso o servidor roda
+// DESANEXADO por padrão: este processo sobe o servidor num processo
+// independente, imprime o endereço e sai na hora. O assistente acompanha
+// com `status`.
+//
+// Uso:
+//   node --no-warnings scripts/configurar.mjs            (abre e devolve o controle)
+//   node --no-warnings scripts/configurar.mjs status     (em andamento? concluída?)
+//   node --no-warnings scripts/configurar.mjs --anexado  (fica preso ao terminal; testes)
 
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, openSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { abrirNoSistema } from './plataforma.mjs';
@@ -33,6 +44,9 @@ const TEMPO_LIMITE_MS = 15 * 60 * 1000;
 const URL_PADRAO = 'https://chefweb.chef.totvs.com.br/ChefWebAPI';
 const CAMINHO_PERFIL = join(RAIZ, 'data', 'perfil-agente.json');
 const PASTA_IDENTIDADE = join(RAIZ, 'personalizados', 'identidade');
+// Enquanto a pagina esta no ar, este arquivo existe e diz onde ela esta. E o
+// que permite ao assistente saber se o gestor ainda esta configurando.
+const CAMINHO_ESTADO = join(RAIZ, 'data', 'configuracao-aberta.json');
 
 // Segmentos atendidos pelo TOTVS Food Linha Chef — escolhem a faixa certa
 // em docs/referencias-de-mercado.md. Geralmente todas as lojas de um grupo
@@ -94,6 +108,17 @@ function pagina(corpo) {
   .acoes .remover:hover{background:#fdecea}
   .vazio{color:#6b7280;font-size:15px;padding:16px;border:1px dashed #cfd8dc;border-radius:8px;text-align:center}
   .rodape{margin-top:20px;font-size:12px;color:#9aa5ab;text-align:center}
+  /* Espera do teste de credenciais: a TOTVS exige 30s entre chamadas, e a
+     validacao faz varias — sem isto a tela fica parada e parece travada. */
+  .espera{display:none;margin-top:22px;border:1px solid var(--navy);border-radius:8px;padding:18px;background:#f0f6f9}
+  .espera.ativa{display:block}
+  .espera .titulo{font-weight:700;color:var(--navy);font-size:15px;display:flex;align-items:center;gap:10px}
+  .espera p{margin:10px 0 0;font-size:14px;color:#4a5761}
+  .giro{width:18px;height:18px;border:3px solid #cfd8dc;border-top-color:var(--ambar);border-radius:50%;animation:gira 1s linear infinite;flex:none}
+  @keyframes gira{to{transform:rotate(360deg)}}
+  .barra{height:6px;background:#dde5e9;border-radius:3px;margin-top:14px;overflow:hidden}
+  .barra i{display:block;height:100%;width:0;background:var(--ambar);animation:enche 120s linear forwards}
+  @keyframes enche{to{width:100%}}
 </style>
 </head>
 <body>
@@ -255,10 +280,29 @@ function telaFormulario({ valores = {}, mensagemErro = null, editando = false } 
     <label for="url">Endereço do sistema <span style="font-weight:400;color:#6b7280">(não mexa, salvo orientação da TOTVS)</span></label>
     <input id="url" name="url" value="${esc(v.url)}">
 
-    <button type="submit">Testar e salvar</button>
+    <button type="submit" id="btEnviar">Testar e salvar</button>
+    <div class="espera" id="espera">
+      <div class="titulo"><span class="giro"></span> Testando seu acesso no sistema da TOTVS…</div>
+      <p>Isto costuma levar <strong>de 1 a 2 minutos</strong>: o sistema da TOTVS
+      pede um intervalo entre as consultas, e estamos conferindo se o usuário, a
+      senha e o número de série funcionam de verdade.</p>
+      <p><strong>Não feche esta janela</strong> — o resultado aparece aqui sozinho.</p>
+      <div class="barra"><i></i></div>
+    </div>
   </form>
   <a class="botao secundario" href="/">Voltar sem salvar</a>
   <a class="botao secundario" href="/personalizar">🎨 Personalizar o assistente (nome, jeito de falar, sua marca)</a>
+  <script>
+    // Sem isto a tela fica parada por ate 2 minutos e o gestor acha que travou.
+    document.querySelector('form[action="/salvar"]').addEventListener('submit', function () {
+      document.getElementById('espera').classList.add('ativa');
+      var b = document.getElementById('btEnviar');
+      b.disabled = true;
+      b.textContent = 'Testando…';
+      b.style.opacity = '.6';
+      b.style.cursor = 'progress';
+    });
+  </script>
   <div class="aviso">🔒 Esta página funciona apenas dentro do seu computador
   (endereço local). Suas senhas não são enviadas para a internet — apenas para o
   sistema da TOTVS, na hora de validar o acesso.</div>
@@ -535,21 +579,102 @@ const servidor = createServer(async (req, res) => {
   }
 });
 
-servidor.listen(0, '127.0.0.1', () => {
-  const endereco = `http://127.0.0.1:${servidor.address().port}/`;
-  console.log(`Endereço da página de configuração: ${endereco}`);
-  console.log('Se ela não abrir sozinha, copie esse endereço e cole no navegador.');
-  console.log('Aguardando o gestor concluir (limite de 15 minutos)...');
-  if (!process.argv.includes('--sem-navegador')) {
-    abrirNoSistema(endereco, (erro) => {
-      console.warn(`Não consegui abrir o navegador automaticamente (${erro.message}).`);
-      console.warn(`Peça ao gestor para abrir: ${endereco}`);
-    });
+// ---------- estado da pagina (para o assistente acompanhar) ----------
+
+function lerEstado() {
+  try {
+    const e = JSON.parse(readFileSync(CAMINHO_ESTADO, 'utf8'));
+    process.kill(e.pid, 0); // o processo ainda vive?
+    return e;
+  } catch { return null; }
+}
+const limparEstado = () => { try { rmSync(CAMINHO_ESTADO); } catch { /* ja foi */ } };
+
+function mostrarStatus() {
+  const e = lerEstado();
+  const grupos = carregarConexoes();
+  if (e) {
+    console.log(`A página de configuração está ABERTA em ${e.endereco}`);
+    console.log(`Desde ${new Date(e.iniciado_em).toLocaleString('pt-BR')}. `
+      + 'Aguarde o gestor concluir — enquanto ele não clicar em "Concluir", ela continua no ar.');
+  } else {
+    console.log('A página de configuração não está aberta.');
   }
-  // O limite e de INATIVIDADE, nao de duracao total: cada interacao do gestor
-  // renova o relogio. Um gestor leigo passa dos 15 minutos com facilidade na
-  // primeira configuracao — procurar o numero de serie no ChefWeb, escolher o
-  // arquivo da logomarca — e o servidor morrer no meio faz a pagina parar de
-  // responder sem explicacao nenhuma.
-  agendarEncerramentoPorInatividade();
-});
+  console.log(grupos.length > 0
+    ? `Acessos salvos: ${grupos.length} — ${grupos.map((g) => g.nome ?? g.id).join(', ')}.`
+    : 'Nenhum acesso salvo ainda.');
+  process.exit(e ? 0 : (grupos.length > 0 ? 0 : 2));
+}
+
+// ---------- modo desanexado ----------
+// Sobe o servidor num processo proprio, espera ele anunciar o endereco e sai.
+// Assim o limite de tempo do assistente que chamou nao mata a pagina.
+function abrirDesanexado() {
+  if (lerEstado()) {
+    const e = lerEstado();
+    console.log(`A página de configuração já está aberta em ${e.endereco}`);
+    console.log('Peça ao gestor para usar a janela que já está no navegador.');
+    process.exit(0);
+  }
+  limparEstado();
+  mkdirSync(join(RAIZ, 'data'), { recursive: true });
+  const log = openSync(join(RAIZ, 'data', 'configuracao.log'), 'a');
+  const filho = spawn(process.execPath,
+    ['--no-warnings', fileURLToPath(import.meta.url), '--servidor',
+      ...process.argv.slice(2).filter((a) => a !== '--anexado')],
+    { detached: true, stdio: ['ignore', log, log] });
+  filho.unref();
+
+  // Espera o filho anunciar o endereco (ele grava o arquivo de estado).
+  const limite = Date.now() + 15_000;
+  const tentar = () => {
+    const e = lerEstado();
+    if (e) {
+      console.log(`Página de configuração aberta: ${e.endereco}`);
+      console.log('Se ela não abrir sozinha no navegador, peça ao gestor para colar esse endereço.');
+      console.log('A página fica no ar até o gestor clicar em "Concluir" — pode levar o tempo que ele precisar.');
+      console.log('Acompanhe com: node --no-warnings scripts/configurar.mjs status');
+      process.exit(0);
+    }
+    if (Date.now() > limite) {
+      console.error('Não consegui abrir a página de configuração. Veja data/configuracao.log.');
+      process.exit(1);
+    }
+    setTimeout(tentar, 200);
+  };
+  tentar();
+}
+
+// ---------- ponto de entrada ----------
+
+const acao = process.argv[2];
+if (acao === 'status') {
+  mostrarStatus();
+} else if (!process.argv.includes('--servidor') && !process.argv.includes('--anexado')) {
+  abrirDesanexado();
+} else {
+  servidor.listen(0, '127.0.0.1', () => {
+    const endereco = `http://127.0.0.1:${servidor.address().port}/`;
+    console.log(`Endereço da página de configuração: ${endereco}`);
+    console.log('Se ela não abrir sozinha, copie esse endereço e cole no navegador.');
+    console.log('Aguardando o gestor concluir...');
+    mkdirSync(join(RAIZ, 'data'), { recursive: true });
+    writeFileSync(CAMINHO_ESTADO, `${JSON.stringify({
+      endereco, pid: process.pid, iniciado_em: new Date().toISOString(),
+    }, null, 2)}\n`, 'utf8');
+    process.on('exit', limparEstado);
+
+    if (!process.argv.includes('--sem-navegador')) {
+      abrirNoSistema(endereco, (erro) => {
+        console.warn(`Não consegui abrir o navegador automaticamente (${erro.message}).`);
+        console.warn(`Peça ao gestor para abrir: ${endereco}`);
+      });
+    }
+    // O limite e de INATIVIDADE, nao de duracao total: cada interacao do gestor
+    // renova o relogio. Um gestor leigo passa dos 15 minutos com facilidade na
+    // primeira configuracao — procurar o numero de serie no ChefWeb, escolher o
+    // arquivo da logomarca — e o servidor morrer no meio faz a pagina parar de
+    // responder sem explicacao nenhuma.
+    agendarEncerramentoPorInatividade();
+  });
+}

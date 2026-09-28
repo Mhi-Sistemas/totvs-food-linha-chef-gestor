@@ -33,13 +33,29 @@ digitar credenciais no chat nem ouvir falar de arquivos técnicos.
      segredo, a API aceita um valor padrão);
    - testa a conexão com a TOTVS antes de salvar;
    - guarda tudo localmente e cria o banco de dados.
-   O comando fica aguardando (até 15 minutos) e termina sozinho com sucesso
-   quando o gestor conclui. Avise: "preencha na janela que abriu; eu espero aqui".
+   **O comando devolve o controle na hora**: a página roda num processo
+   próprio e **fica no ar pelo tempo que o gestor precisar**, mesmo que a sua
+   execução termine. Avise: *"abri a página no seu navegador; preencha com
+   calma, eu espero"*.
+   Para saber em que pé está, use
+   `node --no-warnings scripts/configurar.mjs status` — ele diz se a página
+   continua aberta e quais acessos já foram salvos. **Não fique chamando o
+   comando de abrir de novo**: se a página já está no ar, ele apenas repete o
+   endereço.
+   **Avise o gestor que o teste das credenciais demora de 1 a 2 minutos** (a
+   TOTVS exige intervalo entre as consultas). A própria página mostra o aviso
+   e uma barra de progresso enquanto testa — ele não deve fechar a janela.
 
-3. **Interprete o resultado do comando**:
-   - Saiu com sucesso → "conectei com sucesso ao sistema da sua loja!"
-   - Tempo esgotado (15 min) → pergunte se ele teve dificuldade e ofereça abrir
-     de novo, ou tirar dúvidas sobre as credenciais (`docs/como-obter-credenciais.md`).
+3. **Acompanhe pelo `status`** (a página avisa você pelo arquivo de estado):
+   - `status` diz "ABERTA" → o gestor ainda está preenchendo; espere, converse,
+     tire dúvidas sobre onde achar cada credencial
+     (`docs/como-obter-credenciais.md`). Nunca peça a senha pelo chat.
+   - `status` diz "não está aberta" **e lista acessos salvos** → ele concluiu:
+     "conectei com sucesso ao sistema da sua loja!"
+   - `status` diz "não está aberta" **e nenhum acesso salvo** → ele desistiu ou
+     fechou a janela; pergunte se teve dificuldade e ofereça abrir de novo.
+   - A página se encerra sozinha após 15 minutos **sem nenhum uso** (o relógio
+     reinicia a cada clique dele).
    - Se o navegador não abrir sozinho, informe o endereço local que o comando
      imprimiu para o gestor colar no navegador.
 
