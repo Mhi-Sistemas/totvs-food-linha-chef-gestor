@@ -9,6 +9,13 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.6] — 28/09/2026
+
+### Correções
+
+- Em gráficos estreitos, os valores do eixo apareciam colados uns nos outros
+  ("R$ 1 miR$ 2 mi"). Agora o eixo esconde o que não cabe.
+
 ## [1.0.5] — 28/09/2026
 
 ### Novidades

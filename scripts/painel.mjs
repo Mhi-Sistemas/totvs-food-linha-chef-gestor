@@ -636,7 +636,8 @@ function montarOpcoes(meta, d) {
     // ("R$ 690,7" em vez de "R$ 690,7 mil"). Serie unica desenha esse rotulo,
     // entao precisa de folga extra.
     if (d.series.length === 1) opcoes.grid = { ...opcoes.grid, right: 96 };
-    opcoes.xAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: (v) => abreviar(v, meta.formato) } };
+    opcoes.xAxis = { type: 'value', ...EIXOS, splitNumber: 4,
+      axisLabel: { ...EIXOS.axisLabel, hideOverlap: true, formatter: (v) => abreviar(v, meta.formato) } };
     opcoes.yAxis = { type: 'category', inverse: true, data: d.categorias, ...EIXOS, axisLabel: { ...EIXOS.axisLabel, width: EH_MOVEL ? 88 : 150, overflow: 'truncate' }, splitLine: { show: false } };
     opcoes.series = d.series.map((s) => ({
       type: 'bar', name: s.nome, data: s.valores, barMaxWidth: 20, cursor: drillavel ? 'pointer' : 'default',
@@ -652,11 +653,11 @@ function montarOpcoes(meta, d) {
       axisLabel: { ...EIXOS.axisLabel, interval: todosOsRotulos ? 0 : 'auto',
         fontSize: d.categorias.length > 9 ? 10.5 : EIXOS.axisLabel.fontSize },
       splitLine: { show: false } };
-    opcoes.yAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: (v) => abreviar(v, meta.formato) } };
+    opcoes.yAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, hideOverlap: true, formatter: (v) => abreviar(v, meta.formato) } };
     opcoes.series = d.series.map((s) => ({ type: 'bar', name: s.nome, data: s.valores, barMaxWidth: 26, cursor: drillavel ? 'pointer' : 'default', itemStyle: { borderRadius: [4, 4, 0, 0] } }));
   } else { // linha
     opcoes.xAxis = { type: 'category', boundaryGap: false, data: d.categorias, ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: rotuloDia }, splitLine: { show: false } };
-    opcoes.yAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, formatter: (v) => abreviar(v, meta.formato) } };
+    opcoes.yAxis = { type: 'value', ...EIXOS, axisLabel: { ...EIXOS.axisLabel, hideOverlap: true, formatter: (v) => abreviar(v, meta.formato) } };
     opcoes.series = d.series.map((s, si) => ({
       type: 'line', name: s.nome, data: s.valores, smooth: 0.15,
       lineStyle: { width: 2 }, symbol: 'circle', symbolSize: 7, showSymbol: d.categorias.length <= 45,

@@ -76,7 +76,7 @@ o custo de equipe, no mesmo período, segue folgado.
 | Estoque e compras | Engenharia de cardápio |
 |---|---|
 | [![Estoque](docs/imagens/estoque-compras.png)](docs/imagens/estoque-compras.png) | [![Cardápio](docs/imagens/engenharia-cardapio.png)](docs/imagens/engenharia-cardapio.png) |
-| Itens críticos para repor hoje, valor parado por categoria e a posição completa por loja | Curva ABC com **margem por item**: o campeão de volume quase nunca é o campeão de lucro |
+| Insumos e produtos acabando, valor parado e a posição por loja — **sem confundir prato preparado com item de prateleira**: café e self-service não têm estoque, quem tem são os insumos da ficha | Curva ABC com **margem por item**: o campeão de volume quase nunca é o campeão de lucro |
 
 > Os números e nomes destas imagens são de uma **rede fictícia**, criada só
 > para a demonstração. Seus dados nunca saem do seu computador.
