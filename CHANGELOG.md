@@ -11,14 +11,6 @@ são escritas em linguagem de gestor, não de programador.
 
 ## [1.0.3] — 28/09/2026
 
-### Novidades
-
-- **A fatia "Outros" dos gráficos de pizza deixou de ser caixa-preta.** Ela
-  agora diz quantos itens esconde — "Outros (40)" — e **é clicável**: o gráfico
-  abre exatamente o que está agrupado ali, quantas vezes for preciso, até o
-  último item. Num painel de meios de pagamento com 45 formas cadastradas, 40
-  delas ficavam invisíveis.
-
 ### Correções
 
 - **Uma loja sem permissão deixava as outras sem dados.** Quando o usuário do
