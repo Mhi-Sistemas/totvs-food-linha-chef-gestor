@@ -354,3 +354,5 @@ gestores de food service.
   sem garantias de qualquer tipo, conforme a licença [MIT](LICENSE). Confira
   sempre números importantes diretamente no sistema oficial antes de tomar
   decisões críticas.
+  
+🇧🇷 Deus, Pátria, Família e Liberdade
