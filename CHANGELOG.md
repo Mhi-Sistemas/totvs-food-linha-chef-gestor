@@ -9,6 +9,16 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.7] — 28/09/2026
+
+### Novidades
+
+- **Suas dúvidas agora viram pergunta pública com resposta.** Quando você pede
+  ao assistente para registrar uma dúvida ou uma ideia, ela vai para a área de
+  discussões do projeto, em vez de virar um chamado perdido no meio dos
+  problemas técnicos: a resposta fica guardada e pesquisável para quem passar
+  pela mesma situação. Problemas continuam indo para a fila de correções.
+
 ## [1.0.6] — 28/09/2026
 
 ### Correções

@@ -196,7 +196,9 @@ envie com `email.mjs enviar` **somente após aprovação explícita**.
      (cópia de segurança local em Documentos, sem credenciais; **restaurar
      apaga os dados atuais — exige `--confirmar` e confirmação do gestor**)
    - `node --no-warnings scripts/reportar.mjs bug|melhoria|duvida --titulo "..." --texto "..."`
-     (registra problemas e ideias como issue pública do projeto. Ofereça quando
+     (registra o relato no lugar certo sozinho: problema vira ISSUE, dúvida e
+     melhoria viram DISCUSSÃO — dúvida em categoria de pergunta e resposta,
+     onde fica pesquisável. Ofereça quando
      o gestor relatar erro ou sugerir algo — e para bugs que você mesmo achar.
      Conteúdo é PÚBLICO: o comando remove senha/serial/tokens sozinho, mas
      nomes de clientes, CPF/CNPJ e valores reais ficam de fora por SUA conta.

@@ -343,7 +343,12 @@ Como fazer, na ordem:
 4. Envie: `node --no-warnings scripts/reportar.mjs bug|melhoria|duvida
    --titulo "resumo" --texto "descrição"`. Com o GitHub CLI autenticado na
    máquina, o envio é direto; sem ele, o comando abre o navegador com tudo
-   preenchido (o site pede login).
+   preenchido (o site pede login). **Cada tipo vai para o lugar certo
+   sozinho**: problema vira *issue* (é trabalho a fazer), enquanto dúvida e
+   melhoria viram *discussão* — a dúvida numa categoria de pergunta e
+   resposta, onde fica pesquisável para o próximo gestor com o mesmo aperto.
+   Você não escolhe nada disso: o script descobre a categoria e, se algo
+   falhar, registra como issue para o relato nunca se perder.
 5. **Gestor sem conta GitHub? Configure uma vez, com ele** — vale o esforço:
    com a conta, ele **recebe por e-mail a resposta** quando o relato for
    respondido ou resolvido, sem depender de ninguém. Roteiro (você executa,

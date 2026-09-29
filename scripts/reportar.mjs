@@ -3,7 +3,14 @@
 // Licenciado sob a Licenca MIT (veja LICENSE e NOTICE).
 // Projeto independente, sem vinculo oficial com a TOTVS.
 //
-// Reporta um problema, uma melhoria ou uma duvida como issue do projeto.
+// Reporta um problema, uma melhoria ou uma duvida para o projeto.
+//
+// CADA COISA NO SEU LUGAR: problema vira ISSUE (é trabalho a fazer, tem de
+// entrar na fila de quem mantém); duvida e melhoria viram DISCUSSAO — dúvida
+// numa categoria de pergunta e resposta, onde fica pesquisável para o próximo
+// gestor com o mesmo aperto, e melhoria onde outros podem opinar antes de
+// virar tarefa. Se o repositório não tiver Discussions (ou a categoria certa),
+// tudo volta a ser issue automaticamente: o relato do gestor nunca se perde.
 //
 // O gestor nao sabe o que e GitHub — quem redige e envia e o assistente, e
 // SEMPRE com o texto aprovado pelo gestor antes (issue e conteudo publico).
@@ -48,10 +55,56 @@ const GH = acharGh();
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'mhi-sistemas/totvs-food-linha-chef-gestor';
 const TIPOS = {
-  bug: { prefixo: '[problema]', rotulo: 'bug' },
-  melhoria: { prefixo: '[melhoria]', rotulo: 'enhancement' },
-  duvida: { prefixo: '[duvida]', rotulo: 'question' },
+  bug: { prefixo: '[problema]', rotulo: 'bug', destino: 'issue' },
+  melhoria: { prefixo: '[melhoria]', rotulo: 'enhancement', destino: 'ideias' },
+  duvida: { prefixo: '[duvida]', rotulo: 'question', destino: 'duvidas' },
 };
+
+// A categoria é descoberta em TEMPO DE EXECUÇÃO, nunca por id fixo: quem
+// mantém o repositório pode renomear as categorias a qualquer momento, e o
+// assistente instalado na casa do gestor não pode quebrar por causa disso.
+//   duvidas -> a categoria de pergunta e resposta (isAnswerable)
+//   ideias  -> a que fala de ideia/sugestão; na falta, a conversa geral
+function acharCategoria(destino) {
+  try {
+    const saida = execFileSync(GH, ['api', 'graphql', '-f', `query={
+      repository(owner: "${REPO.split('/')[0]}", name: "${REPO.split('/')[1]}") {
+        hasDiscussionsEnabled
+        discussionCategories(first: 25) { nodes { id name slug isAnswerable } }
+      } }`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = JSON.parse(saida)?.data?.repository;
+    if (!repo?.hasDiscussionsEnabled) return null;
+    const cats = repo.discussionCategories?.nodes ?? [];
+    if (destino === 'duvidas') return cats.find((c) => c.isAnswerable) ?? null;
+    const texto = (c) => `${c.name} ${c.slug}`.toLowerCase();
+    return cats.find((c) => /ideia|ideas|sugest/.test(texto(c)))
+      ?? cats.find((c) => /geral|general/.test(texto(c)))
+      ?? null;
+  } catch { return null; }
+}
+
+function criarDiscussao(categoriaId, titulo, corpo) {
+  const escapar = (t) => JSON.stringify(String(t));
+  const saida = execFileSync(GH, ['api', 'graphql', '-f', `query=
+    mutation {
+      createDiscussion(input: {
+        repositoryId: ${escapar(idDoRepositorio())},
+        categoryId: ${escapar(categoriaId)},
+        title: ${escapar(titulo)},
+        body: ${escapar(corpo)}
+      }) { discussion { url } }
+    }`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const url = JSON.parse(saida)?.data?.createDiscussion?.discussion?.url;
+  if (!url) throw new Error('o GitHub não devolveu o endereço da discussão');
+  return url;
+}
+
+function idDoRepositorio() {
+  const saida = execFileSync(GH, ['api', 'graphql', '-f', `query={
+    repository(owner: "${REPO.split('/')[0]}", name: "${REPO.split('/')[1]}") { id } }`],
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return JSON.parse(saida).data.repository.id;
+}
 
 function lerArgs() {
   const args = {};
@@ -120,31 +173,56 @@ if (!tipo || typeof args.titulo !== 'string' || typeof args.texto !== 'string') 
     console.log('--- SIMULAÇÃO (nada foi enviado) ---');
     console.log(`Título: ${titulo}`);
     console.log(`Rótulo: ${tipo.rotulo}`);
-    console.log(`Envio: ${ghAutenticado() ? 'direto (GitHub CLI autenticado)' : 'navegador com a issue preenchida'}`);
+    const cat = tipo.destino !== 'issue' && ghAutenticado() ? acharCategoria(tipo.destino) : null;
+    console.log(`Destino: ${cat ? `discussão na categoria "${cat.name}"` : 'issue'}`);
+    console.log(`Envio: ${ghAutenticado() ? 'direto (GitHub CLI autenticado)' : 'navegador já preenchido'}`);
     console.log('--- corpo ---');
     console.log(corpo);
   } else if (ghAutenticado()) {
-    try {
-      const url = execFileSync(
-        GH,
-        ['issue', 'create', '--repo', REPO, '--title', titulo, '--body', corpo, '--label', tipo.rotulo],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-      ).trim();
-      console.log(`Relato enviado: ${url}`);
-    } catch (erro) {
-      console.error(`Não consegui enviar pelo GitHub CLI: ${String(erro.stderr || erro.message).slice(0, 200)}`);
-      process.exitCode = 1;
+    // Dúvida e melhoria preferem discussão; qualquer tropeço volta para issue,
+    // porque o que não pode acontecer é o relato do gestor se perder.
+    const categoria = tipo.destino === 'issue' ? null : acharCategoria(tipo.destino);
+    let enviado = null;
+    if (categoria) {
+      try {
+        enviado = criarDiscussao(categoria.id, titulo, corpo);
+        console.log(`Relato enviado como discussão em "${categoria.name}": ${enviado}`);
+      } catch (erro) {
+        console.warn(`Não consegui abrir a discussão (${String(erro.message).slice(0, 120)}); `
+          + 'registrando como issue.');
+      }
+    }
+    if (!enviado) {
+      try {
+        const url = execFileSync(
+          GH,
+          ['issue', 'create', '--repo', REPO, '--title', titulo, '--body', corpo, '--label', tipo.rotulo],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+        ).trim();
+        console.log(`Relato enviado: ${url}`);
+      } catch (erro) {
+        console.error(`Não consegui enviar pelo GitHub CLI: ${String(erro.stderr || erro.message).slice(0, 200)}`);
+        process.exitCode = 1;
+      }
     }
   } else {
     // Sem GitHub CLI: abre o navegador com tudo preenchido. O GitHub pede
     // login (conta gratuita) — o assistente deve ter avisado o gestor antes.
-    const url = `https://github.com/${REPO}/issues/new?labels=${encodeURIComponent(tipo.rotulo)}`
-      + `&title=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`;
+    // Sem CLI nao da para descobrir a categoria (a consulta exige token), entao
+    // o formulario de discussao vai sem ela — o GitHub pede que o gestor
+    // escolha na tela, que e um clique.
+    const url = tipo.destino === 'issue'
+      ? `https://github.com/${REPO}/issues/new?labels=${encodeURIComponent(tipo.rotulo)}`
+        + `&title=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`
+      : `https://github.com/${REPO}/discussions/new?title=${encodeURIComponent(titulo)}`
+        + `&body=${encodeURIComponent(corpo)}`;
     abrirNoSistema(url, () => {
       console.error('Não consegui abrir o navegador. Endereço para abrir manualmente:');
       console.error(url);
     });
-    console.log('Abri no navegador a página de envio, já preenchida — é só clicar em "Submit new issue".');
+    console.log(tipo.destino === 'issue'
+      ? 'Abri no navegador a página de envio, já preenchida — é só clicar em "Submit new issue".'
+      : 'Abri no navegador a página de envio, já preenchida — escolha a categoria e clique em "Start discussion".');
     console.log('(O site pede uma conta do GitHub, que é gratuita.)');
   }
 }

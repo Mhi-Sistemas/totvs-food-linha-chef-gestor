@@ -2,12 +2,20 @@
 
 Contribuições são bem-vindas — pode escrever em português, do seu jeito.
 
-## Achou um problema ou tem uma ideia?
+## Achou um problema, tem uma dúvida ou uma ideia?
 
-Abra uma [issue](../../issues) descrevendo o que aconteceu (ou o que você
-gostaria que acontecesse). Se for um erro, ajuda muito informar: o que você
-pediu ao assistente, o que ele respondeu e qual sistema você usa (Windows ou
-Mac). **Nunca cole senhas, número de série ou dados de clientes na issue.**
+Cada coisa tem seu lugar — e, se você usa o assistente, basta pedir a ele que
+escreve e envia para o lugar certo:
+
+| O que é | Onde vai |
+|---|---|
+| **Algo não funciona** | [Issue](../../issues) — descreva o que pediu, o que aconteceu e qual sistema você usa (Windows ou Mac) |
+| **Uma dúvida de uso** | [Discussões → Dúvidas](../../discussions) — a resposta fica pesquisável para quem passar pelo mesmo |
+| **Uma ideia** | [Discussões → Ideias](../../discussions) — outras pessoas podem opinar antes de virar tarefa |
+| **Um painel ou indicador que você criou** | [Discussões → Mostre sua análise](../../discussions) |
+
+**Nunca cole senhas, número de série ou dados de clientes** — nada disso é
+necessário para entender o problema, e tudo ali é público.
 
 ## Vai enviar código?
 
