@@ -17,6 +17,21 @@ outra empresa no Chef".
 **Fluxo principal: a página de configuração no navegador.** O gestor NÃO deve
 digitar credenciais no chat nem ouvir falar de arquivos técnicos.
 
+
+## A senha do ChefWeb expira
+
+É a causa mais comum de "parou de funcionar do nada": o ChefWeb faz as senhas
+expirarem periodicamente, a coleta para e o gestor não mudou nada. A rotina
+diária registra alerta quando isso acontece.
+
+Atalho: `node --no-warnings scripts/configurar.mjs senha [--grupo <id>]` — abre
+a página local **já na tela daquele grupo**, para ele só digitar a nova.
+**Nunca peça a senha pelo chat.**
+
+Se a senha estiver certa e o acesso continuar recusado, o problema é permissão:
+o usuário precisa de **permissão total** no ChefWeb, **replicada em todas as
+lojas**, uma a uma — não basta liberar os relatórios.
+
 ## Passo a passo
 
 1. **Acolha o gestor** em uma frase: "vou abrir uma página segura no seu

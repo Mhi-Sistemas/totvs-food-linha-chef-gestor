@@ -31,6 +31,8 @@ import { carregarConexoes } from './conexoes.mjs';
 import { abrirBanco, criarSchema, CAMINHO_BANCO } from './criar-banco.mjs';
 import { criarBackup, pastaDeBackup, listarCopias } from './backup.mjs';
 import { aplicarAtualizacao } from './atualizar.mjs';
+import { dominio as dominioInfo } from './dominios.mjs';
+import { marcarParaRecoleta, diasParaRecoletar } from './completude.mjs';
 import { registrarAlerta } from './alertas.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,7 +40,9 @@ const NOME_AGENDAMENTO = 'rotina-diaria';
 
 // Dominios que dependem de periodo, na ordem de importancia para o gestor.
 const DOMINIOS_DIARIOS = [
-  'vendas', 'fechamentos', 'sangrias', 'provisao',
+  // conferencia-vendas vem logo apos as vendas de proposito: e a testemunha
+  // que permite saber, no mesmo dia, se a coleta de vendas veio completa.
+  'vendas', 'conferencia-vendas', 'fechamentos', 'sangrias', 'provisao',
   'contas-pagar', 'livro-caixa', 'notas-venda', 'notas-entrada',
 ];
 // Sem periodo: estoque e diario (fotografia); catalogo e semanal (produtos
@@ -91,9 +95,13 @@ function montarPlano(db, conexoes) {
   const ontem = somarDias(hoje, -1);
   const hora = agora.getHours();
   const dentroDaJanela = hora >= 23 || hora < 7;
-  // Fora da janela noturna a TOTVS bloqueia vendas com mais de 16 dias; dentro
-  // dela limitamos a 31 dias por rodada para a rotina nao virar madrugada inteira.
-  const maisAntigoPermitido = dentroDaJanela ? somarDias(ontem, -30) : somarDias(hoje, -15);
+  // Dentro da janela limitamos a 31 dias por rodada para a rotina nao virar
+  // madrugada inteira. Fora dela, a TOTVS bloqueia mais de 16 dias — mas so
+  // nos dominios com trava de horario (as vendas). Dominio sem trava, como a
+  // conferencia de vendas, pode recuperar o atraso inteiro de dia: era isso
+  // que impedia a testemunha de alcancar a venda que ela deveria conferir.
+  const limiteJanela = somarDias(hoje, -15);
+  const limiteRodada = somarDias(ontem, -30);
 
   const ultimas = ultimasSincronizacoes(db);
   const plano = [];
@@ -101,6 +109,8 @@ function montarPlano(db, conexoes) {
     for (const dominio of DOMINIOS_DIARIOS) {
       const fim = ultimas.get(`${conexao.id}|${dominio}`)?.fim;
       let de = fim ? somarDias(fim, 1) : somarDias(ontem, -6);
+      const travado = dominioInfo(dominio)?.janelaNoturna === true;
+      const maisAntigoPermitido = dentroDaJanela || !travado ? limiteRodada : limiteJanela;
       let truncado = false;
       if (de < maisAntigoPermitido) { de = maisAntigoPermitido; truncado = true; }
       if (de > ontem) {
@@ -284,6 +294,68 @@ async function executar(args) {
   // ao gestor na proxima conversa). Sem internet ou sem acesso, fica quieto
   // e tenta amanha. Roda por ultimo de proposito: o codigo novo so passa a
   // valer na proxima execucao, nunca no meio de uma.
+  // CONFERENCIA E RECOLETA DOS DIAS INCOMPLETOS.
+  //
+  // Roda no fim de proposito: as testemunhas do dia (fechamento de caixa e
+  // conferencia de vendas) sao baixadas DEPOIS das vendas, entao antes disso
+  // nao haveria com o que comparar.
+  //
+  // O que estiver incompleto entra na fila de recoleta e e rebuscado aqui
+  // mesmo, um dia por vez. O que resistir a tres tentativas nao e mais
+  // problema de coleta — e defeito do lado da TOTVS, e vira alerta com
+  // proposta de chamado.
+  try {
+    const dbC = abrirBanco();
+    try {
+      const ateOntem = somarDias(isoLocal(new Date()), -1);
+      const desde = somarDias(ateOntem, -35);
+      for (const conexao of conexoes) {
+        const { marcados } = marcarParaRecoleta(dbC, { conexao: conexao.id, de: desde, ate: ateOntem });
+        if (marcados > 0) {
+          console.log(`  [${conexao.id}] ${marcados} dia(s) vieram incompletos — entrando na fila de recoleta.`);
+        }
+
+        // Rebusca poucos por rodada para nao virar madrugada; o resto fica
+        // para amanha, e a fila so encolhe.
+        for (const d of diasParaRecoletar(dbC, conexao.id, 5)) {
+          const r = spawnSync(process.execPath, ['--no-warnings', join(RAIZ, 'scripts', 'sincronizar.mjs'),
+            '--dominio', 'vendas', '--grupo', conexao.id, '--loja', String(d.codigo_loja),
+            '--de', d.dia, '--ate', d.dia], { cwd: RAIZ, encoding: 'utf8' });
+          if (r.status === 0) console.log(`  [${conexao.id}] rebuscado ${dmy(d.dia)} da loja ${d.codigo_loja}.`);
+        }
+
+        // Segunda passagem: tira da fila o que a rebusca resolveu e descobre
+        // quem ja resistiu a tres tentativas.
+        const { persistentes } = marcarParaRecoleta(dbC, { conexao: conexao.id, de: desde, ate: ateOntem });
+        if (persistentes.length > 0) {
+          const total = persistentes.reduce((t, d) => t + (d.caixa - d.vendas), 0);
+          registrarAlerta({
+            chave: `dias-incompletos-${conexao.id}`,
+            titulo: `${persistentes.length} dia(s) que o sistema da TOTVS não entrega completos`,
+            detalhe: `Mesmo depois de três tentativas, ${persistentes.length} dia(s) continuam vindo `
+              + 'com menos vendas do que o próprio caixa registrou — cerca de '
+              + `${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} de movimento. `
+              + `Exemplos: ${persistentes.slice(0, 3)
+                .map((d) => `${dmy(d.dia)} loja ${d.codigo_loja}`).join('; ')}.`,
+            orientacao: 'Isso é defeito do lado da TOTVS, não da sua operação. Posso montar o texto '
+              + 'do chamado para o suporte deles com os dias e os valores. Enquanto isso, os '
+              + 'relatórios desse período saem com a ressalva de dados incompletos.',
+          });
+        }
+      }
+    } finally { dbC.close(); }
+  } catch (erro) { console.warn(`  conferência dos dados: ${erro.message}`); }
+
+  // Relatos que o gestor enviou: descobre o que a equipe ja resolveu ou
+  // respondeu e transforma em alerta, para ele saber que foi atendido sem
+  // precisar voltar ao site. Silencioso quando nao ha nada.
+  try {
+    const r = spawnSync(process.execPath,
+      ['--no-warnings', join(RAIZ, 'scripts', 'reportar.mjs'), 'verificar', '--silencioso'],
+      { cwd: RAIZ, encoding: 'utf8' });
+    if (r.status === 0 && r.stdout?.trim()) console.log(`  relatos: ${r.stdout.trim()}`);
+  } catch { /* sem rede: fica para amanha */ }
+
   // Pendencia da lista de espera do benchmark (se houver, tenta reenviar).
   try {
     const r = spawnSync(process.execPath, ['--no-warnings', join(RAIZ, 'scripts', 'benchmark.mjs'), 'enviar-pendentes'], { cwd: RAIZ, encoding: 'utf8' });

@@ -29,6 +29,13 @@ export const DOMINIOS = [
   { id: 'livro-caixa', nome: 'Livro caixa', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'notas-venda', nome: 'Notas de venda', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'notas-entrada', nome: 'Notas de entrada', tipo: 'periodo', historico: true, janelaNoturna: false },
+  // Terceira testemunha do movimento, ao lado das vendas e do fechamento de
+  // caixa: um registro por CUPOM emitido, com valor e situacao na SEFAZ.
+  // Serve para conferir se a coleta de vendas veio completa — e, ao contrario
+  // das vendas, NAO tem trava de horario (validado em 30/09/2026 buscando um
+  // dia de 84 dias atras as 13h), entao da para conferir o historico a
+  // qualquer hora.
+  { id: 'conferencia-vendas', nome: 'Conferência de vendas', tipo: 'periodo', historico: true, janelaNoturna: false },
   { id: 'produtos', nome: 'Catálogo de produtos', tipo: 'cadastro' },
   { id: 'estoque', nome: 'Fotografia de estoque', tipo: 'cadastro' },
   { id: 'clientes', nome: 'Clientes', tipo: 'cadastro' },

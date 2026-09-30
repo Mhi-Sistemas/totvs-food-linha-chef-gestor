@@ -33,6 +33,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { abrirBanco } from './criar-banco.mjs';
+import { calcularCmv, fonteCmvDaDre, gravarPreferencia, FONTES_CMV, ROTULO_CMV } from './cmv.mjs';
+import { conferirTodos, ressalvaImpressa } from './completude.mjs';
 import { carregarConexoes } from './conexoes.mjs';
 import { abrirNoSistema } from './plataforma.mjs';
 import { carregarIdentidade } from './identidade.mjs';
@@ -94,7 +96,34 @@ function linhasDespesasPorPlano(db, meses, sqlBase, parametros) {
   return grupos;
 }
 
-function calcularCompetencia(db, meses, grupo) {
+// CMV do mes na fonte que o GESTOR escolheu. Quando a escolhida nao existe
+// naquele mes — tipicamente o real, que precisa de estoque nas duas pontas e
+// so passa a existir depois da instalacao — recua para o teorico e REGISTRA o
+// recuo, para a nota da DRE dizer ao gestor o que aconteceu. Zerar a linha
+// seria pior: inflaria o lucro bruto sem avisar.
+function cmvDoMes(db, fonte, mes, grupo) {
+  const de = `${mes}-01`;
+  const ate = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0))
+    .toISOString().slice(0, 10);
+  const conexoes = grupo
+    ? [grupo]
+    : db.prepare('SELECT DISTINCT conexao FROM vendas ORDER BY conexao').all().map((r) => r.conexao);
+
+  let total = 0;
+  let recuou = false;
+  for (const cx of conexoes) {
+    const r = calcularCmv(db, fonte, cx, de, ate, null);
+    if (r.valor === null) {
+      recuou = true;
+      total += calcularCmv(db, 'teorico', cx, de, ate, null).valor ?? 0;
+    } else {
+      total += r.valor;
+    }
+  }
+  return { valor: total, recuou };
+}
+
+function calcularCompetencia(db, meses, grupo, fonteCmv = 'teorico') {
   const fG = grupo ? ' AND conexao = ?' : '';
   const pG = grupo ? [grupo] : [];
   const fGv = grupo ? ' AND v.conexao = ?' : '';
@@ -106,22 +135,29 @@ function calcularCompetencia(db, meses, grupo) {
         + COALESCE(json_extract(json_original,'$.TotalizadorVenda.ValorTotalPIS'),0)
         + COALESCE(json_extract(json_original,'$.TotalizadorVenda.ValorTotalCOFINS'),0)) AS total
     FROM vendas WHERE cancelada = 0${fG} AND substr(data_movimento,1,7) BETWEEN ? AND ? GROUP BY 1`, [...pG, meses[0], meses.at(-1)]);
-  const cmv = porMes(db, meses, `SELECT substr(v.data_movimento,1,7) AS mes,
-      SUM(i.quantidade * COALESCE(i.preco_compra, p.preco_compra, 0)) AS total
-    FROM venda_itens i
-    JOIN vendas v ON v.chave_venda = i.chave_venda AND v.conexao = i.conexao
-    LEFT JOIN produtos p ON p.codigo = i.codigo_produto AND p.conexao = i.conexao
-    WHERE v.cancelada = 0 AND i.status = 1 AND i.codigo_produto NOT IN (997,999)${fGv}
-      AND substr(v.data_movimento,1,7) BETWEEN ? AND ? GROUP BY 1`, [...pG, meses[0], meses.at(-1)]);
+  const cmvMeses = meses.map((m) => cmvDoMes(db, fonteCmv, m, grupo));
+  const cmv = cmvMeses.map((c) => c.valor);
+  const mesesQueRecuaram = meses.filter((_, i) => cmvMeses[i].recuou);
 
+  // Compra de mercadoria NAO entra nas despesas operacionais: o custo dela ja
+  // e a linha de CMV, logo acima. Contar nos dois lugares subtrai o mesmo
+  // dinheiro duas vezes e afunda o resultado — era o que acontecia (R$ 5.577
+  // em um unico mes na base de validacao). No regime de CAIXA nao se exclui:
+  // la nao ha linha de CMV, e a saida de dinheiro para comprar mercadoria e
+  // uma saida de caixa como qualquer outra.
+  const semMercadoria = `AND NOT EXISTS (SELECT 1 FROM plano_categorias pc
+        WHERE pc.categoria = 'mercadoria'
+          AND pc.plano1 = COALESCE(contas_pagar.plano_contas1, '')
+          AND (pc.plano2 = '*' OR pc.plano2 = COALESCE(contas_pagar.plano_contas2, '')))`;
   const grupos = linhasDespesasPorPlano(db, meses, `SELECT substr(COALESCE(data_competencia, data_emissao),1,7) AS mes,
       plano_contas1 AS plano1, plano_contas2 AS plano2, SUM(valor) AS total
-    FROM contas_pagar WHERE substr(COALESCE(data_competencia, data_emissao),1,7) BETWEEN ? AND ?${fG}
+    FROM contas_pagar WHERE COALESCE(deletado, 0) = 0 AND substr(COALESCE(data_competencia, data_emissao),1,7) BETWEEN ? AND ?${fG}
+      ${semMercadoria}
     GROUP BY 1,2,3`, [meses[0], meses.at(-1), ...pG]);
   const despesas = meses.map((_, i) => grupos.reduce((s, g) => s + g.valores[i], 0));
 
   const cobertura = db.prepare(`SELECT SUM(CASE WHEN plano_contas1 IS NOT NULL AND plano_contas1 != '' THEN valor ELSE 0 END) AS com, SUM(valor) AS total
-    FROM contas_pagar WHERE substr(COALESCE(data_competencia, data_emissao),1,7) BETWEEN ? AND ?${fG}`).get(meses[0], meses.at(-1), ...pG);
+    FROM contas_pagar WHERE COALESCE(deletado, 0) = 0 AND substr(COALESCE(data_competencia, data_emissao),1,7) BETWEEN ? AND ?${fG}`).get(meses[0], meses.at(-1), ...pG);
 
   const receitaLiquida = subtrair(receita, impostos);
   const lucroBruto = subtrair(receitaLiquida, cmv);
@@ -129,12 +165,17 @@ function calcularCompetencia(db, meses, grupo) {
   return {
     base: receitaLiquida,
     cobertura: cobertura?.total ? (cobertura.com / cobertura.total) * 100 : null,
-    nota: 'Receitas por data de movimento; despesas por competência (contas a pagar, pagas ou não); impostos efetivos por cupom; CMV teórico pela ficha técnica.',
+    nota: 'Receitas por data de movimento; despesas por competência (contas a pagar, pagas ou não); '
+      + `impostos efetivos por cupom; ${ROTULO_CMV[fonteCmv]}.`
+      + (mesesQueRecuaram.length > 0
+        ? ` Em ${mesesQueRecuaram.map(rotuloMes).join(', ')} não havia como apurar o CMV escolhido `
+          + '(falta posição de estoque ou plano de contas marcado), então esses meses usam o CMV teórico.'
+        : ''),
     linhas: [
       { id: 'rb', tipo: 'total', rotulo: 'RECEITA BRUTA DE VENDAS', valores: receita },
       { id: 'imp', tipo: 'deducao', rotulo: '(−) Impostos sobre vendas', valores: impostos.map((v) => -v) },
       { id: 'rl', tipo: 'total', rotulo: '= RECEITA LÍQUIDA', valores: receitaLiquida },
-      { id: 'cmv', tipo: 'deducao', rotulo: '(−) CMV teórico (ficha técnica)', valores: cmv.map((v) => -v) },
+      { id: 'cmv', tipo: 'deducao', rotulo: `(−) ${ROTULO_CMV[fonteCmv]}`, valores: cmv.map((v) => -v) },
       { id: 'lb', tipo: 'total', rotulo: '= LUCRO BRUTO', valores: lucroBruto },
       { id: 'dsp', tipo: 'secao', rotulo: '(−) DESPESAS OPERACIONAIS', valores: despesas.map((v) => -v), grupos },
       { id: 'res', tipo: 'resultado', rotulo: '= RESULTADO OPERACIONAL', valores: resultado },
@@ -180,7 +221,7 @@ function calcularCaixa(db, meses, grupo) {
 //   colunas de numeros. ECharts embutido (offline).
 // ---------------------------------------------------------------------------
 
-function gerarHtml({ titulo, visoes, grupoRotulo }) {
+function gerarHtml({ titulo, visoes, grupoRotulo, ressalva = null }) {
   const agora = new Date();
   const echarts = readFileSync(join(RAIZ, 'assets', 'echarts.min.js'), 'utf8');
   const identidade = carregarIdentidade();
@@ -203,6 +244,7 @@ function gerarHtml({ titulo, visoes, grupoRotulo }) {
   header img{height:40px}
   header h1{font-size:19px;margin:0;font-weight:650}
   header .carimbo{margin-left:auto;font-size:12.5px;opacity:.75;text-align:right}
+  .ressalva{margin:0;padding:12px 22px;background:#fff4e5;color:#7a4a00;border-bottom:1px solid #f0d9b5;font-size:13.5px;line-height:1.5}
   main{max-width:1020px;margin:0 auto;padding:22px 20px 8px}
   .barra{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   .pills{display:flex;background:#e5eaf0;border-radius:12px;padding:3px}
@@ -273,6 +315,7 @@ function gerarHtml({ titulo, visoes, grupoRotulo }) {
 </head>
 <body>
 <header>${logo ? `<img src="${logo}" alt="TOTVS Chef">` : ''}<h1>${esc(titulo)}</h1><div class="carimbo">${esc(carimbo)}</div></header>
+${ressalva ? `<div class="ressalva">${esc(ressalva)}</div>` : ''}
 <main>
   <div class="barra">
     <div class="pills" id="pills-visao"></div>
@@ -537,9 +580,49 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const acao = process.argv[2];
   const args = lerArgs();
   try {
-    if (acao !== 'gerar') {
+    if (acao === 'cmv-fonte') {
+      // Qual CMV entra na DRE e ESCOLHA DO GESTOR — o assistente explica as
+      // tres e pergunta, nunca decide sozinho (docs/ajuda/como-calculamos-o-cmv.md).
+      const escolha = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : null;
+      const db = abrirBanco();
+      try {
+        const grupo = typeof args.grupo === 'string' ? args.grupo : '*';
+        if (!escolha) {
+          const atual = fonteCmvDaDre(db, grupo === '*' ? null : grupo);
+          console.log(`CMV usado hoje na DRE: ${ROTULO_CMV[atual]}`);
+          console.log('');
+          console.log('Opções (pergunte ao gestor qual ele quer ver):');
+          console.log('  teorico  — custo de ficha técnica dos itens vendidos. Funciona em qualquer');
+          console.log('             período, mas mostra o que DEVERIA ter sido consumido: não enxerga');
+          console.log('             desperdício, quebra nem desvio.');
+          console.log('  real     — estoque inicial + compras − estoque final. É o consumo que de fato');
+          console.log('             aconteceu, o único que revela perda. Precisa de posição de estoque');
+          console.log('             nas duas pontas do mês (fotografia diária ou inventário importado).');
+          console.log('  compras  — o que foi lançado nos planos de contas marcados como compra de');
+          console.log('             mercadoria. Bate com o extrato, mas confunde comprar com consumir.');
+          console.log('');
+          console.log('Para definir: dre.mjs cmv-fonte teorico|real|compras [--grupo <id>]');
+        } else if (!FONTES_CMV.includes(escolha)) {
+          throw new Error(`fonte inválida "${escolha}". Use: ${FONTES_CMV.join(', ')}`);
+        } else {
+          gravarPreferencia(db, 'dre_cmv', escolha, grupo);
+          console.log(`✅ A DRE passa a usar: ${ROTULO_CMV[escolha]}`
+            + (grupo !== '*' ? ` (grupo ${grupo})` : ''));
+          if (escolha === 'compras') {
+            const n = db.prepare("SELECT COUNT(*) AS n FROM plano_categorias WHERE categoria = 'mercadoria'").get().n;
+            if (n === 0) {
+              console.log('⚠️ Nenhum plano de contas está marcado como compra de mercadoria ainda — '
+                + 'sem isso a linha fica vazia. Rode: categorias-planos.mjs sugerir --categoria mercadoria, '
+                + 'confirme com o gestor e defina com categorias-planos.mjs definir "PLANO|SUB=mercadoria".');
+            }
+          }
+        }
+      } finally { db.close(); }
+    } else if (acao !== 'gerar') {
       console.error('Uso: dre.mjs gerar [--mes AAAA-MM] [--grupo <id>] [--saida x.html] [--abrir]');
       console.error('     (padrão: visão Mensal do mês anterior + visão Anual dos últimos 12 meses)');
+      console.error('   |  dre.mjs cmv-fonte [teorico|real|compras] [--grupo <id>]');
+      console.error('     (qual CMV aparece na DRE — pergunte ao gestor; sem argumento, mostra a escolha atual)');
       process.exitCode = 1;
     } else {
       // Mês de referência: o ANTERIOR ao atual (mês fechado) — o ritual do gestor.
@@ -568,9 +651,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const db = abrirBanco({ somenteLeitura: true });
       let visoes;
       try {
+        const fonteCmv = fonteCmvDaDre(db, grupo);
         const calcular = (meses) => ({
           meses,
-          regimes: { competencia: calcularCompetencia(db, meses, grupo), caixa: calcularCaixa(db, meses, grupo) },
+          regimes: {
+            competencia: calcularCompetencia(db, meses, grupo, fonteCmv),
+            caixa: calcularCaixa(db, meses, grupo),
+          },
         });
         visoes = {
           mensal: { rotulo: `Mensal (${rotuloMes(mesRef)})`, comparativo: true, ...calcular([mesAntes(mesRef), mesRef]) },
@@ -578,8 +665,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         };
       } finally { db.close(); }
 
+      // A DRE e a peca que mais vira decisao — se o periodo tem buraco, isso
+      // precisa estar escrito nela, nao so dito na conversa.
+      let ressalva = null;
+      try {
+        const dbC = abrirBanco({ somenteLeitura: true });
+        try {
+          ressalva = ressalvaImpressa(conferirTodos(dbC, {
+            de: `${mesRef}-01`,
+            ate: new Date(Date.UTC(Number(mesRef.slice(0, 4)), Number(mesRef.slice(5, 7)), 0))
+              .toISOString().slice(0, 10),
+            grupo,
+          }));
+        } finally { dbC.close(); }
+      } catch { /* nao bloqueia a DRE */ }
+
       const titulo = `DRE Gerencial${grupoRotulo ? ` — ${grupoRotulo}` : ''}`;
-      const html = gerarHtml({ titulo, visoes, grupoRotulo });
+      const html = gerarHtml({ titulo, visoes, grupoRotulo, ressalva });
       const saida = args.saida ?? join(RAIZ, 'relatorios', 'dre', `dre-${mesRef}.html`);
       mkdirSync(dirname(resolve(saida)), { recursive: true });
       writeFileSync(saida, html, 'utf8');

@@ -59,7 +59,7 @@ if (acao === 'sugerir') {
            COUNT(*) AS usos, ROUND(SUM(p.valor_efetivo), 2) AS valor,
            c.categoria AS categoria_atual
     FROM venda_pagamentos p
-    LEFT JOIN formas_pagamento_categorias c ON c.descricao = p.descricao
+    LEFT JOIN formas_pagamento_categorias c ON TRIM(c.descricao) = TRIM(p.descricao)
     GROUP BY p.descricao ORDER BY valor DESC`).all();
   if (formas.length === 0) {
     console.log('Nenhum pagamento sincronizado ainda. Sincronize vendas primeiro.');
@@ -98,7 +98,7 @@ if (acao === 'sugerir') {
   for (const d of definidas) console.log(`  ${d.descricao} → ${d.categoria}`);
   const pendentes = db.prepare(`
     SELECT DISTINCT p.descricao FROM venda_pagamentos p
-    LEFT JOIN formas_pagamento_categorias c ON c.descricao = p.descricao
+    LEFT JOIN formas_pagamento_categorias c ON TRIM(c.descricao) = TRIM(p.descricao)
     WHERE c.descricao IS NULL`).all();
   if (pendentes.length > 0) {
     console.log('Sem categoria (use "sugerir" e depois "definir"):');

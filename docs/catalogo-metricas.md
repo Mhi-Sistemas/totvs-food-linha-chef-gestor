@@ -198,14 +198,58 @@ indevido.
 
 ## 3. Financeiras
 
-### 3.1 CMV real e %CMV
+### 3.1 CMV — as três fontes, e quem escolhe
+
+Há **três formas legítimas** de apurar o custo da mercadoria vendida, e **quem
+escolhe qual vai para a DRE é o gestor** (`dre.mjs cmv-fonte`), nunca o
+assistente. Explique as três antes de perguntar — roteiro em linguagem de
+gestor em `docs/ajuda/como-calculamos-o-cmv.md`:
+
+| Fonte | Como | Ponto forte | Ponto cego |
+|---|---|---|---|
+| **teórico** (2.5) | ficha técnica dos itens vendidos | funciona em qualquer período, sem depender de estoque | não enxerga desperdício, quebra nem desvio |
+| **real** (abaixo) | estoque inicial + compras − estoque final | é o consumo verdadeiro; revela a perda | exige estoque nas duas pontas do período |
+| **compras** | planos de contas marcados como `mercadoria` (`categorias-planos.mjs`) | bate com o extrato e com a contabilidade | confunde comprar com consumir (estocagem infla o mês) |
+
+O **gap entre o teórico e o real** é o melhor detector de perda que o projeto
+tem (2.5) — por isso vale migrar o gestor para o real assim que houver
+histórico de estoque, mantendo o teórico como referência de comparação.
+
+### 3.1a CMV real e %CMV
 **CMV = Estoque inicial + Compras − Estoque final** | **%CMV = CMV ÷ B2 × 100**.
-- Estoque inicial/final: `estoque_posicoes` valorizado por `produtos.preco_compra`,
-  nas leituras (`data_leitura`) que abrem e fecham o período — **exige fotografia
-  do estoque no início e no fim** (oriente o gestor a "atualizar o estoque" todo
-  fim de mês).
-- Compras: `notas_fiscais` tipo 'entrada' no período (por `data` = entrada).
-- Sem as duas fotografias → use o CMV teórico (2.5) e diga que é aproximação.
+- Estoque inicial/final: `estoque_posicoes` valorizado por
+  **`estoque_posicoes.custo`** — o custo do dia da foto, congelado na coleta —
+  nas leituras (`data_leitura`) que abrem e fecham o período. **Exige fotografia
+  do estoque no início e no fim.** A rotina diária tira uma foto por dia
+  sozinha; o histórico de estoque **começa no dia da instalação**, porque a API
+  não devolve posição retroativa (não há como calcular CMV real de um mês
+  anterior à primeira foto — nesse caso, CMV teórico e diga que é aproximação).
+  ⚠️ Não valorize por `produtos.preco_compra`: o catálogo é sobrescrito a cada
+  sincronização, então o cadastro de hoje não é o custo de quando a foto foi
+  tirada.
+- **Compras: `contas_pagar` por `data_competencia`, filtrado pelos planos
+  marcados como `mercadoria` e com `deletado = 0`** — não pelas notas de
+  entrada, que trazem equipamento, utensílio e serviço misturados à mercadoria
+  (e transferências entre lojas do mesmo grupo). Consequência: **o CMV real
+  depende da categorização dos planos**, como o CMO depende da categoria
+  `pessoal`. Sem ela, `analisar.mjs cmv` explica o que falta e não inventa
+  número.
+- **Fonte alternativa (e única para meses antigos): o INVENTÁRIO contado**,
+  importado do relatório 41 do ChefWeb com `scripts/inventario.mjs`. Na mesma
+  data, a contagem física prevalece sobre a fotografia. É o que permite CMV
+  real de período anterior à instalação do assistente.
+- **Use `analisar.mjs cmv --de --ate [--grupo] [--loja]`**: ele escolhe a melhor
+  fonte para cada ponta (inventário ou fotografia, a mais próxima da data),
+  informa a origem e a defasagem, e alerta quando uma das pontas é contagem
+  parcial ou quando não houve nota de entrada no período.
+- Sem nenhuma das duas pontas → use o CMV teórico (2.5) e diga que é aproximação.
+
+⚠️ Antes de apresentar CMV ou margem, rode `analisar.mjs qualidade`: **custo
+incoerente por fator de conversão não preenchido** (a caixa de 1.000 potes
+lançada como 1 pote) infla o CMV de um jeito que parece real. O detector
+compara o custo com o padrão do subgrupo e usa `unidade_compra <> unidade` como
+indício, e **ignora os adicionais de preço 0/0,01**, onde o custo alto é
+estratégia comercial.
 
 ⚠️ Denominador é **B2** (sem taxa de serviço) — usar B1 reduz o % artificialmente.
 Benchmarks BR (F360/Unilever FS/Abrasel, 2024–2026): geral saudável **28–35%**;

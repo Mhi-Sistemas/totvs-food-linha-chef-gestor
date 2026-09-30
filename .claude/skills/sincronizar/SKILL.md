@@ -90,7 +90,7 @@ e cargas históricas.
 5. **Confira e reporte**: o script imprime quantos registros vieram. Traduza:
    "pronto! Atualizei suas vendas: 1.234 cupons de 01/09 a 22/09". Se vier zero
    registro num período em que a loja funcionou, desconfie — causas comuns:
-   - o **usuário do ChefWeb não tem permissão de acesso total aos relatórios**
+   - o **usuário do ChefWeb não tem permissão total** (replicada em todas as lojas)
      (e, em redes, a permissão precisa estar **replicada em todas as lojas**) —
      peça ao gestor para ajustar com quem administra o ChefWeb;
    - código da loja errado no cadastro do assistente;

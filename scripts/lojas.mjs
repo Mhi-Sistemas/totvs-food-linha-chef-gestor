@@ -411,7 +411,21 @@ const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Assinaturas de falha de DADOS do servidor (erro 30 "listar os itens",
 // erro 20 "divide by zero"): deterministicas, locais do periodo — nunca
 // contam como falha geral. Ver docs/api/erros-conhecidos.md.
-const ehFalhaDeDados = (texto) => /listar os itens da\(s\) venda|Divide by zero/i.test(texto);
+// Tempo esgotado tem assinatura propria e consequencia propria: nao adianta
+// retentar o mesmo mes inteiro, porque o volume da loja e que nao cabe na
+// janela de resposta — a loja passa a ser coletada um dia por vez.
+const EH_TIMEOUT = /tempo esgotado|timeout|TimeoutError|ETIMEDOUT|aborted|AbortError/i;
+
+// Falha ligada ao PERIODO/LOJA pedidos, nao ao ambiente: nao arma o freio
+// global (que existe para janela, credencial e queda da API) e merece ficar
+// registrada para recuperacao dia a dia.
+//
+// Tempo esgotado entra aqui de proposito: e volume de dados da loja, nao
+// problema geral. Antes ele contava como falha geral e, em loja movimentada,
+// cinco meses seguidos derrubavam o dominio INTEIRO — inclusive das lojas que
+// estavam funcionando (relatado na issue #3).
+const ehFalhaDeDados = (texto) => /listar os itens da\(s\) venda|Divide by zero/i.test(texto)
+  || EH_TIMEOUT.test(texto);
 
 // Versao assincrona do sincronizar: permite UM TRABALHADOR POR DOMINIO em
 // paralelo (o limite de requisicoes da TOTVS e por endpoint — cada dominio
@@ -503,8 +517,9 @@ async function coletar(db, args) {
       titulo: `Lojas sem permissão de acesso no grupo "${args.grupo}"`,
       detalhe: `O usuário usado na integração não tem acesso à(s) loja(s) `
         + `${[...estado.lojasSemAcesso].join(', ')} — nenhum dado delas pode ser baixado.`,
-      orientacao: 'Conceder ao usuário a permissão de acesso total aos relatórios '
-        + 'nessas lojas, no ChefWeb (Cadastros > Usuários), ou pedir isso ao suporte da TOTVS.',
+      orientacao: 'Conceder ao usuário a permissão TOTAL no ChefWeb '
+        + 'nessas lojas, no ChefWeb (Cadastros > Usuários) — a permissão precisa ser '
+        + 'replicada loja a loja —, ou pedir isso ao suporte da TOTVS.',
     });
   }
   if (estado.dominiosSemPermissao.size > 0) {
@@ -614,6 +629,49 @@ async function coletar(db, args) {
 // Executa a fila de UM dominio: uma busca por (loja, mes), na ordem,
 // respeitando o limite de requisicoes da API. E RETOMAVEL: meses ja
 // cobertos sao pulados, entao pode ser interrompido a qualquer momento.
+// Quantos tempos esgotados na mesma loja antes de trocar a estrategia dela.
+// Dois ja e padrao: o primeiro pode ser instabilidade da rede, o segundo
+// confirma que o volume da loja nao cabe numa busca mensal.
+const TIMEOUTS_PARA_DIA_A_DIA = 2;
+
+function lojasDiaADia(db, grupo) {
+  try {
+    return new Set(db.prepare(
+      'SELECT codigo_loja FROM lojas WHERE conexao = ? AND COALESCE(coletar_dia_a_dia, 0) = 1'
+    ).all(grupo).map((l) => l.codigo_loja));
+  } catch { return new Set(); }
+}
+
+// Registra o tempo esgotado e, no limite, torna o dia a dia o PADRAO da loja.
+function registrarTimeout(db, grupo, loja) {
+  try {
+    db.prepare('UPDATE lojas SET timeouts_vendas = COALESCE(timeouts_vendas, 0) + 1 '
+      + 'WHERE conexao = ? AND codigo_loja = ?').run(grupo, loja);
+    const n = db.prepare('SELECT COALESCE(timeouts_vendas, 0) AS n FROM lojas '
+      + 'WHERE conexao = ? AND codigo_loja = ?').get(grupo, loja)?.n ?? 0;
+    if (n >= TIMEOUTS_PARA_DIA_A_DIA) {
+      const ja = db.prepare('SELECT COALESCE(coletar_dia_a_dia, 0) AS v FROM lojas '
+        + 'WHERE conexao = ? AND codigo_loja = ?').get(grupo, loja)?.v;
+      if (!ja) {
+        db.prepare('UPDATE lojas SET coletar_dia_a_dia = 1 WHERE conexao = ? AND codigo_loja = ?')
+          .run(grupo, loja);
+        const nome = db.prepare('SELECT nome FROM lojas WHERE conexao = ? AND codigo_loja = ?')
+          .get(grupo, loja)?.nome;
+        registrarAlerta({
+          chave: `dia-a-dia-${grupo}-${loja}`,
+          titulo: `A loja ${loja}${nome ? ` (${nome})` : ''} passou a ser buscada dia a dia`,
+          detalhe: 'O movimento dessa loja é grande demais para o sistema da TOTVS entregar '
+            + 'um mês inteiro de uma vez — a busca estourava o tempo e voltava vazia.',
+          orientacao: 'Nenhuma ação sua é necessária: a busca continua sozinha, um dia por vez. '
+            + 'Ela fica mais demorada, então o histórico dessa loja leva mais noites para ficar pronto.',
+        });
+        return true; // acabou de virar
+      }
+    }
+  } catch { /* banco de versao anterior */ }
+  return false;
+}
+
 async function coletarDominio(db, args, dominio, estado) {
   const hora = new Date().getHours();
   const noite = hora >= 23 || hora < 7;
@@ -652,6 +710,8 @@ async function coletarDominio(db, args, dominio, estado) {
   // zona ruim sem abandonar os meses bons mais recentes da loja.
   const falhasSeguidas = new Map();
   const pularBloco = new Map(); // loja -> meses restantes a pular
+  // Lojas cujo volume ja provou nao caber numa busca mensal.
+  const marcadasDiaADia = dominio === 'vendas' ? lojasDiaADia(db, args.grupo) : new Set();
   // Falha de dados nao arma o freio global. Na retomada a fila recomeca
   // pelos meses sabidamente ruins, entao "so falhas ate agora" e o estado
   // normal do reinicio, nao problema geral.
@@ -696,6 +756,23 @@ async function coletarDominio(db, args, dominio, estado) {
     }
     const aPular = pularBloco.get(t.loja) ?? 0;
     if (aPular > 0) { pularBloco.set(t.loja, aPular - 1); pulados += 1; continue; }
+    // Loja que ja provou nao caber numa busca mensal vai direto para a fila do
+    // dia a dia: tentar o mes inteiro de novo so gastaria a janela noturna
+    // para falhar igual.
+    if (dominio === 'vendas' && marcadasDiaADia.has(t.loja)) {
+      const [a0, m0] = t.mes.split('-').map(Number);
+      const ult = new Date(Date.UTC(a0, m0, 0)).getUTCDate();
+      db.prepare(
+        'INSERT INTO coleta_falhas (conexao, dominio, codigo_loja, periodo_inicio, periodo_fim, motivo) '
+        + 'VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(args.grupo, dominio, t.loja, `${t.mes}-01`,
+        `${t.mes}-${String(ult).padStart(2, '0')}`,
+        'loja marcada para coleta dia a dia (volume nao cabe na busca mensal)');
+      pulados += 1;
+      console.log(`[${dominio} ${i + 1}/${fila.length}] dia-a-dia loja ${t.loja} ${t.mes} `
+        + '- enfileirado para recuperacao um dia por vez');
+      continue;
+    }
     const [ano, mes] = t.mes.split('-').map(Number);
     const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
     const de = `${t.mes}-01`;
@@ -758,7 +835,7 @@ async function coletarDominio(db, args, dominio, estado) {
           + 'VALUES (?, ?, ?, ?, ?, ?)'
         ).run(args.grupo, dominio, t.loja, de, ate, saida.trim().slice(-300));
         console.warn(`        usuario da API sem acesso a loja ${t.loja}: pulando a loja `
-          + 'inteira. Conceda a permissao de relatorios a esta loja no ChefWeb.');
+          + 'inteira. Conceda a permissao TOTAL a esta loja no ChefWeb.');
         if (i < fila.length - 1) await esperar(intervaloMs);
         continue;
       }
@@ -772,6 +849,17 @@ async function coletarDominio(db, args, dominio, estado) {
           + 'VALUES (?, ?, ?, ?, ?, ?)'
         ).run(args.grupo, dominio, t.loja, de, ate, saida.trim().slice(-300));
         mesesComFalha.push(`${dominio}: loja ${t.loja} ${t.mes}`);
+      }
+      // Tempo esgotado na CapaVenda: e volume, nao defeito. Conta para a
+      // loja e, no limite, troca a estrategia dela de vez.
+      if (dominio === 'vendas' && EH_TIMEOUT.test(saida)) {
+        if (registrarTimeout(db, args.grupo, t.loja)) {
+          marcadasDiaADia.add(t.loja);
+          console.warn(`        loja ${t.loja} passa a ser coletada UM DIA POR VEZ `
+            + '(o volume dela nao cabe numa busca de mes inteiro).');
+          estado.lojasQueViraramDiaADia = estado.lojasQueViraramDiaADia ?? [];
+          estado.lojasQueViraramDiaADia.push(t.loja);
+        }
       }
       const seguidas = (falhasSeguidas.get(t.loja) ?? 0) + 1;
       falhasSeguidas.set(t.loja, seguidas);
@@ -1277,6 +1365,27 @@ else if (acao === 'coletar' && args['todos-grupos']) {
   }
 }
 else if (acao === 'coletar') await coletar(db, args);
+else if (acao === 'dia-a-dia') {
+  // Controle manual da estrategia de coleta da loja — o assistente liga
+  // sozinho depois de tempos esgotados repetidos, mas quem opera a revenda
+  // pode antecipar isso numa loja que ja se sabe pesada.
+  if (!args.grupo || !args.loja) {
+    console.error('Uso: lojas.mjs dia-a-dia --grupo <id> --loja <n> [--desligar]');
+    process.exitCode = 1;
+  } else {
+    const ligar = args.desligar ? 0 : 1;
+    const n = db.prepare('UPDATE lojas SET coletar_dia_a_dia = ?, timeouts_vendas = ? '
+      + 'WHERE conexao = ? AND codigo_loja = ?')
+      .run(ligar, ligar ? 99 : 0, args.grupo, Number(args.loja)).changes;
+    if (n === 0) console.error(`Loja ${args.loja} não encontrada no grupo "${args.grupo}".`);
+    else if (ligar) {
+      console.log(`✅ Loja ${args.loja}: as vendas passam a ser buscadas UM DIA POR VEZ.`);
+      console.log('   Mais lenta, porém confiável em loja de movimento alto.');
+    } else {
+      console.log(`✅ Loja ${args.loja}: volta a ser buscada por mês inteiro.`);
+    }
+  }
+}
 else if (acao === 'progresso') progresso(db, args);
 else {
   console.error('Ação inválida. Use: definir | importar | listar | plano | coletar | progresso');

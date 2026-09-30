@@ -307,6 +307,264 @@ passo('exportar xlsx', () => {
   espera(codigo === 0, saida.slice(0, 200));
   espera(readFileSync(destino).subarray(0, 2).toString() === 'PK', 'xlsx não é um zip válido');
 });
+// 7b. Inventario: o xlsx que o exportar.mjs escreve serve de cobaia para o
+// leitor de planilha, entao um teste so cobre os dois lados (escrita e
+// leitura) e a importacao ponta a ponta.
+passo('inventário: ler planilha e importar', () => {
+  const destino = join(RAIZ, 'relatorios', 'fumaca-inventario.xlsx');
+  // Duas contagens: a vespera do periodo e o fechamento — as duas pontas que
+  // o CMV real precisa.
+  const sql = "SELECT 1 AS Loja, '2026-01-31' AS Data, 77 AS 'Nº Inventario', 1 AS 'Código',"
+    + " 'PRODUTO TESTE' AS Produto, 'ALIMENTOS' AS Grupo, 'X' AS Subgrupo,"
+    + " 10 AS 'Qtde Contada', 4 AS 'Qtde Atual', 6 AS 'Diferença', 'UN' AS Un,"
+    + " 60 AS Valor, 'ACERTO' AS Motivo"
+    + " UNION ALL SELECT 1, '2026-02-28', 78, 1, 'PRODUTO TESTE', 'ALIMENTOS', 'X',"
+    + " 3, 1, 2, 'UN', 20, 'ACERTO'";
+  const exp = rodar([join(RAIZ, 'scripts', 'exportar.mjs'), 'xlsx', '--saida', destino, '--aba', `Inv=${sql}`]);
+  espera(exp.codigo === 0, exp.saida.slice(0, 200));
+
+  const imp = rodar([join(RAIZ, 'scripts', 'inventario.mjs'), 'importar', '--arquivo', destino, '--grupo', 'grupo-a']);
+  espera(imp.codigo === 0, imp.saida.slice(0, 300));
+  espera(/2 linha\(s\) guardada/.test(imp.saida), `importação não confirmou: ${imp.saida.slice(0, 200)}`);
+
+  // O custo da epoca sai de valor / diferenca: 60 / 6 = 10.
+  const q = rodar([join(RAIZ, 'scripts', 'consultar.mjs'), '--json',
+    'SELECT data, codigo_loja, numero, quantidade_contada AS q, custo_unitario AS c FROM inventarios']);
+  const linhas = JSON.parse(q.saida).sort((a, b) => a.data.localeCompare(b.data));
+  espera(linhas.length === 2, `esperava 2 linhas, veio ${linhas.length}`);
+  espera(linhas[0].data === '2026-01-31' && linhas[0].codigo_loja === 1 && linhas[0].numero === '77',
+    `identificação errada: ${JSON.stringify(linhas[0])}`);
+  espera(linhas[0].q === 10 && linhas[0].c === 10, `quantidade/custo errados: ${JSON.stringify(linhas[0])}`);
+
+  // Reimportar o mesmo arquivo nao pode duplicar.
+  rodar([join(RAIZ, 'scripts', 'inventario.mjs'), 'importar', '--arquivo', destino, '--grupo', 'grupo-a']);
+  const q2 = rodar([join(RAIZ, 'scripts', 'consultar.mjs'), '--json', 'SELECT COUNT(*) AS n FROM inventarios']);
+  espera(JSON.parse(q2.saida)[0].n === 2, 'reimportar duplicou o inventário');
+
+  // Sem dizer o grupo, com dois configurados, tem de recusar com orientacao.
+  const semGrupo = rodar([join(RAIZ, 'scripts', 'inventario.mjs'), 'importar', '--arquivo', destino]);
+  espera(semGrupo.codigo !== 0 && /grupo/i.test(semGrupo.saida), 'deveria exigir --grupo com 2 grupos');
+});
+
+passo('CMV real usa o inventário quando não há fotografia', () => {
+  const cmvArgs = [join(RAIZ, 'scripts', 'analisar.mjs'), 'cmv',
+    '--grupo', 'grupo-a', '--de', '2026-02-01', '--ate', '2026-02-28'];
+
+  // Sem plano de contas marcado como mercadoria nao ha como apurar as compras:
+  // o comando tem de EXPLICAR o que falta, nunca inventar um numero.
+  const semPlano = rodar(cmvArgs);
+  espera(semPlano.codigo === 0 && /compra de mercadoria/.test(semPlano.saida),
+    `não orientou sobre o plano de contas: ${semPlano.saida.slice(0, 300)}`);
+  rodar([join(RAIZ, 'scripts', 'categorias-planos.mjs'), 'definir', 'COMPRAS|*=mercadoria']);
+
+  const { codigo, saida } = rodar(cmvArgs);
+  espera(codigo === 0, saida.slice(0, 200));
+  // A vespera de 01/02 e 31/01, dia do inventario importado acima.
+  espera(/inventário de 31\/01\/2026/.test(saida), `não usou o inventário inicial: ${saida.slice(0, 400)}`);
+  espera(/inventário de 28\/02\/2026/.test(saida), `não usou o inventário final: ${saida.slice(0, 400)}`);
+  // Estoque inicial 10 x R$ 10 = 100; final 3 x R$ 10 = 30; sem compras -> CMV 70.
+  espera(/R\$\s*100,00/.test(saida) && /R\$\s*70,00/.test(saida), `CMV errado: ${saida.slice(0, 500)}`);
+});
+
+passo('DRE: o gestor escolhe a fonte do CMV', () => {
+  const dre = join(RAIZ, 'scripts', 'dre.mjs');
+  // Sem argumento, lista as opcoes para o assistente apresentar ao gestor.
+  const listar = rodar([dre, 'cmv-fonte']);
+  espera(listar.codigo === 0 && /teorico/.test(listar.saida) && /real/.test(listar.saida)
+    && /compras/.test(listar.saida), listar.saida.slice(0, 200));
+
+  const invalida = rodar([dre, 'cmv-fonte', 'chutometro']);
+  espera(invalida.codigo !== 0, 'fonte inválida deveria falhar');
+
+  const definir = rodar([dre, 'cmv-fonte', 'real']);
+  espera(definir.codigo === 0 && /CMV real/.test(definir.saida), definir.saida.slice(0, 200));
+  espera(/CMV real/.test(rodar([dre, 'cmv-fonte']).saida), 'a escolha não ficou gravada');
+
+  // A DRE tem de sair mesmo sem estoque para apurar o real: recua para o
+  // teorico e AVISA na nota, em vez de zerar a linha.
+  const saida = join(RAIZ, 'relatorios', 'dre', 'fumaca-cmv.html');
+  const gerar = rodar([dre, 'gerar', '--mes', '2026-01', '--saida', saida]);
+  espera(gerar.codigo === 0, gerar.saida.slice(0, 200));
+  const html = readFileSync(saida, 'utf8');
+  espera(/CMV real \(estoque \+ compras\)/.test(html), 'o rótulo do CMV não seguiu a escolha');
+  espera(/usam o CMV teórico/.test(html), 'a DRE não avisou o recuo para o teórico');
+  // Mes sempre por nome: nunca 2026-01 numa entrega ao gestor.
+  espera(!/Em 2026-/.test(html), 'mês apareceu no formato AAAA-MM na nota');
+
+  rodar([dre, 'cmv-fonte', 'teorico']);
+});
+
+passo('relatos: acompanhamento e situação', () => {
+  const rep = join(RAIZ, 'scripts', 'reportar.mjs');
+  // Sem nenhum relato enviado, os dois comandos tem de ser mansos.
+  espera(/Nenhum relato/.test(rodar([rep, 'situacao']).saida), 'situacao deveria dizer que não há relatos');
+  espera(rodar([rep, 'verificar']).codigo === 0, 'verificar deveria sair sem erro sem relatos');
+
+  // Relato que o GitHub nao conhece: a consulta falha e isso NAO pode virar
+  // alerta nem derrubar a rotina diaria — o gestor nao tem o que fazer com isso.
+  writeFileSync(join(DADOS, 'relatos.json'), JSON.stringify([{
+    tipo: 'bug', destino: 'issue', numero: 999999, titulo: 'relato de fumaça',
+    url: 'https://github.com/x/y/issues/999999', criado_em: '2026-01-01',
+    estado: 'aberto', respostas: 0,
+  }], null, 2), 'utf8');
+  const v = rodar([rep, 'verificar']);
+  espera(v.codigo === 0, `verificar não pode falhar com relato inacessível: ${v.saida.slice(0, 200)}`);
+
+  const sit = rodar([rep, 'situacao']);
+  espera(/aguardando/.test(sit.saida) && /relato de fumaça/.test(sit.saida), sit.saida.slice(0, 200));
+});
+
+await passoAsync('completude: acusa dia incompleto e imprime a ressalva', async () => {
+  // Cenario: um dia com caixa fechado em R$ 1.000 e so R$ 50 de venda
+  // coletada. E o defeito do relato: a API respondeu "sucesso" com o dia pela
+  // metade, e sem conferencia isso viraria DRE.
+  const { abrirBanco } = await import('../scripts/criar-banco.mjs');
+  const conn = abrirBanco();
+  try {
+    conn.exec("INSERT OR REPLACE INTO lojas (conexao, codigo_loja, nome) VALUES ('grupo-a', 1, 'Loja Teste')");
+    conn.exec("INSERT OR REPLACE INTO fechamentos_caixa (conexao, id_fechamento, codigo_loja, data_caixa,"
+      + " valor_total_sistema) VALUES ('grupo-a', 9001, 1, '2026-03-10', 1000)");
+    conn.exec("INSERT INTO sync_log (conexao, dominio, codigo_loja, periodo_inicio, periodo_fim, registros)"
+      + " VALUES ('grupo-a', 'vendas', 1, '2026-03-01', '2026-03-31', 1)");
+    conn.exec("INSERT OR REPLACE INTO vendas (conexao, chave_venda, codigo_loja, data_movimento,"
+      + " valor_total, cancelada) VALUES ('grupo-a', 'fum-inc', 1, '2026-03-10', 50, 0)");
+    // Terceira testemunha: num OUTRO dia, so os cupons emitidos acusam o
+    // movimento (sem fechamento de caixa). A conferencia tem de pegar isso.
+    conn.exec("INSERT OR REPLACE INTO conferencia_vendas (conexao, codigo_loja, data_caixa,"
+      + " numero_caixa, numero_cupom, valor_total) VALUES ('grupo-a', 1, '2026-03-11', 1, 1, 800)");
+    conn.exec("INSERT OR REPLACE INTO vendas (conexao, chave_venda, codigo_loja, data_movimento,"
+      + " valor_total, cancelada) VALUES ('grupo-a', 'fum-inc2', 1, '2026-03-11', 20, 0)");
+  } finally { conn.close(); }
+
+  const r = rodar([join(RAIZ, 'scripts', 'analisar.mjs'), 'completude',
+    '--grupo', 'grupo-a', '--de', '2026-03-01', '--ate', '2026-03-31']);
+  espera(r.codigo === 3, `deveria sair com código 3 ao achar buraco: ${r.codigo}`);
+  espera(/incompletos/.test(r.saida), r.saida.slice(0, 300));
+  espera(/R\$\s*50,00/.test(r.saida) && /R\$\s*1\.000,00/.test(r.saida),
+    `não mostrou os valores do dia: ${r.saida.slice(0, 300)}`);
+  // O dia 11 so tem a testemunha dos cupons — tem de aparecer, e dizendo a fonte.
+  espera(/cupons emitidos/.test(r.saida), `não usou a conferência de vendas: ${r.saida.slice(0, 400)}`);
+  espera(/R\$\s*800,00/.test(r.saida), `não acusou o dia visto só pelos cupons: ${r.saida.slice(0, 400)}`);
+
+  // E a ressalva tem de sair IMPRESSA no painel, nao so no chat.
+  const spec = join(tmpdir(), 'fumaca-completude.json');
+  writeFileSync(spec, JSON.stringify({
+    titulo: 'Painel com buraco', grupo: 'grupo-a',
+    periodo: { de: '2026-03-01', ate: '2026-03-31' },
+    kpis: [{ rotulo: 'Vendas', sql: 'SELECT SUM(valor_total) FROM vendas', formato: 'moeda' }],
+  }), 'utf8');
+  const saidaPainel = join(RAIZ, 'relatorios', 'paineis', 'fumaca-completude.html');
+  const gp = rodar([join(RAIZ, 'scripts', 'painel.mjs'), 'gerar', '--spec', spec, '--saida', saidaPainel]);
+  espera(gp.codigo === 0, gp.saida.slice(0, 200));
+  espera(/class="ressalva"/.test(readFileSync(saidaPainel, 'utf8')), 'painel não imprimiu a ressalva');
+
+  // O dia incompleto tem de virar PENDENCIA DE RECOLETA, e sair da fila
+  // sozinho quando os dados chegarem — senao o buraco so seria denunciado,
+  // nunca fechado.
+  const { marcarParaRecoleta, diasParaRecoletar } = await import('../scripts/completude.mjs');
+  const dbR = abrirBanco();
+  try {
+    const r1 = marcarParaRecoleta(dbR, { conexao: 'grupo-a', de: '2026-03-01', ate: '2026-03-31' });
+    espera(r1.marcados === 2, `esperava 2 dias marcados, veio ${r1.marcados}`);
+    espera(diasParaRecoletar(dbR, 'grupo-a', 50).length === 2, 'a fila de recoleta não encheu');
+
+    // Simula a recoleta do dia 10 chegando completa: ele sai da fila sozinho.
+    dbR.exec("UPDATE vendas SET valor_total = 1000 WHERE chave_venda = 'fum-inc'");
+    const r2 = marcarParaRecoleta(dbR, { conexao: 'grupo-a', de: '2026-03-01', ate: '2026-03-31' });
+    espera(r2.marcados === 1, `depois de completar o dia 10, esperava 1 marcado, veio ${r2.marcados}`);
+    espera(diasParaRecoletar(dbR, 'grupo-a', 50).length === 1, 'o dia resolvido não saiu da fila');
+
+    // Tres passagens sem melhora: o dia 11 vira defeito do lado da TOTVS.
+    marcarParaRecoleta(dbR, { conexao: 'grupo-a', de: '2026-03-01', ate: '2026-03-31' });
+    const r4 = marcarParaRecoleta(dbR, { conexao: 'grupo-a', de: '2026-03-01', ate: '2026-03-31' });
+    espera(r4.persistentes.length === 1, 'o dia que resiste a 3 tentativas deveria virar alerta');
+  } finally { dbR.close(); }
+
+  // Devolve o banco ao estado anterior: os passos seguintes conferem totais
+  // (o backup, por exemplo, conta as vendas semeadas) e nao podem herdar
+  // dados deste cenario.
+  const limpar = abrirBanco();
+  try {
+    limpar.exec("DELETE FROM vendas WHERE chave_venda IN ('fum-inc', 'fum-inc2')");
+    limpar.exec("DELETE FROM conferencia_vendas WHERE conexao = 'grupo-a'");
+    limpar.exec("DELETE FROM coleta_falhas WHERE conexao = 'grupo-a'");
+    limpar.exec("DELETE FROM fechamentos_caixa WHERE id_fechamento = 9001");
+    limpar.exec("DELETE FROM sync_log WHERE dominio = 'vendas' AND periodo_inicio = '2026-03-01'");
+    limpar.exec("DELETE FROM lojas WHERE conexao = 'grupo-a' AND codigo_loja = 1");
+  } finally { limpar.close(); }
+});
+
+await passoAsync('coleta adaptativa: loja pesada vira dia a dia', async () => {
+  const { abrirBanco } = await import('../scripts/criar-banco.mjs');
+  const db = abrirBanco();
+  try {
+    db.exec("INSERT OR REPLACE INTO lojas (conexao, codigo_loja, nome) VALUES ('grupo-a', 9, 'Loja Pesada')");
+  } finally { db.close(); }
+
+  const lojas = join(RAIZ, 'scripts', 'lojas.mjs');
+  const liga = rodar([lojas, 'dia-a-dia', '--grupo', 'grupo-a', '--loja', '9']);
+  espera(liga.codigo === 0 && /UM DIA POR VEZ/.test(liga.saida), liga.saida.slice(0, 200));
+
+  const ver = rodar([join(RAIZ, 'scripts', 'consultar.mjs'), '--json',
+    "SELECT coletar_dia_a_dia AS v FROM lojas WHERE conexao='grupo-a' AND codigo_loja=9"]);
+  espera(JSON.parse(ver.saida)[0].v === 1, 'a marca não foi gravada');
+
+  const desliga = rodar([lojas, 'dia-a-dia', '--grupo', 'grupo-a', '--loja', '9', '--desligar']);
+  espera(desliga.codigo === 0 && /mês inteiro/.test(desliga.saida), desliga.saida.slice(0, 200));
+
+  // Loja inexistente tem de avisar, nao fingir que deu certo.
+  const inexistente = rodar([lojas, 'dia-a-dia', '--grupo', 'grupo-a', '--loja', '4242']);
+  espera(/não encontrada/.test(inexistente.saida), inexistente.saida.slice(0, 200));
+
+  const limpar = abrirBanco();
+  try { limpar.exec("DELETE FROM lojas WHERE conexao = 'grupo-a' AND codigo_loja = 9"); }
+  finally { limpar.close(); }
+});
+
+await passoAsync('texto da API: entidades e espaços são normalizados', async () => {
+  // O ChefWeb devolve "MAT&#201;RIA PRIMA" (as vezes com escape duplo) e
+  // descricoes com espaco a direita. Os dois produzem numero errado com cara
+  // de certo: plano dividido em dois na DRE, junção por texto falhando calada.
+  const { abrirBanco, criarSchema } = await import('../scripts/criar-banco.mjs');
+  const db = abrirBanco();
+  try {
+    db.exec("INSERT INTO contas_pagar (conexao, codigo_loja, fornecedor, descricao,"
+      + " plano_contas1, plano_contas2, valor, data_emissao)"
+      + " VALUES ('grupo-a', 1, 'FORNECEDOR &amp; CIA', 'x', 'SA&AMP;#205;DAS',"
+      + " 'MAT&#201;RIA PRIMA', 10, '2026-05-01')");
+    db.exec("INSERT INTO venda_pagamentos (conexao, chave_venda, descricao, valor_efetivo)"
+      + " VALUES ('grupo-a', 'fum-pg', 'MAESTRO  ', 5)");
+    criarSchema(db); // a migracao normaliza o que ja esta gravado
+    const c = db.prepare("SELECT fornecedor, plano_contas1 p1, plano_contas2 p2 FROM contas_pagar"
+      + " WHERE conexao = 'grupo-a' AND data_emissao = '2026-05-01'").get();
+    espera(c.p2 === 'MATÉRIA PRIMA', `escape simples não foi decodificado: ${c.p2}`);
+    espera(c.p1 === 'SAÍDAS', `escape DUPLO não foi decodificado: ${c.p1}`);
+    espera(c.fornecedor === 'FORNECEDOR & CIA', `&amp; não virou &: ${c.fornecedor}`);
+    const pg = db.prepare("SELECT descricao FROM venda_pagamentos WHERE chave_venda = 'fum-pg'").get();
+    espera(pg.descricao === 'MAESTRO', `espaço à direita sobreviveu: [${pg.descricao}]`);
+  } finally { db.close(); }
+
+  const limpar = abrirBanco();
+  try {
+    limpar.exec("DELETE FROM contas_pagar WHERE conexao = 'grupo-a' AND data_emissao = '2026-05-01'");
+    limpar.exec("DELETE FROM venda_pagamentos WHERE chave_venda = 'fum-pg'");
+  } finally { limpar.close(); }
+});
+
+passo('senha do ChefWeb: atalho de troca', () => {
+  // A senha expira periodicamente. O atalho tem de abrir a pagina certa e,
+  // acima de tudo, NUNCA aceitar a senha pela linha de comando.
+  const cfg = join(RAIZ, 'scripts', 'configurar.mjs');
+  const semGrupo = rodar([cfg, 'senha']);
+  espera(semGrupo.codigo !== 0 && /mais de um grupo/i.test(semGrupo.saida),
+    `com 2 grupos deveria pedir qual: ${semGrupo.saida.slice(0, 200)}`);
+  espera(/--grupo grupo-a/.test(semGrupo.saida), 'não listou os grupos disponíveis');
+
+  const inexistente = rodar([cfg, 'senha', '--grupo', 'nao-existe']);
+  espera(inexistente.codigo !== 0 && /não encontrado/.test(inexistente.saida),
+    inexistente.saida.slice(0, 200));
+});
+
 passo('exportar docx', () => {
   const md = join(tmpdir(), 'fumaca.md');
   writeFileSync(md, '# Título\n\nParágrafo com **negrito**.\n\n- item 1\n- item 2\n', 'utf8');

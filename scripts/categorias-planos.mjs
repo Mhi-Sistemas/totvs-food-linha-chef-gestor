@@ -22,6 +22,11 @@ import { abrirBanco, criarSchema } from './criar-banco.mjs';
 
 const PADROES = {
   pessoal: /pessoal|sal[aá]rio|folha|encargo|fgts|inss|pr[oó][- ]?labore|vale[- ]?(transporte|refei|alimenta)|comiss|\b13\b|d[eé]cimo|f[eé]rias|rescis|benef[ií]cio|uniforme|treinament|admiss/i,
+  // Compra de MERCADORIA para revenda/producao — a terceira forma de chegar ao
+  // CMV, ao lado do teorico (ficha tecnica) e do real (estoque + compras).
+  // Quem escolhe qual vai para a DRE e o GESTOR (dre.mjs cmv-fonte).
+  // Deliberadamente amplo: e sugestao, e o gestor confirma item a item.
+  mercadoria: /mercadoria|insumo|mat[eé]ria[- ]?prima|hortifr[uú]t|a[cç]ougue|carne|frios|latic[ií]nio|bebida|cervej|refrigerante|padaria|embalagem|descart[aá]vel|fornecedor|compra/i,
 };
 
 function garantirTabela(db) {

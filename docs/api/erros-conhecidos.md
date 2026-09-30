@@ -167,15 +167,16 @@ Classificação usada:
   armar o freio global — é configuração, não queda) e registra alerta ao
   gestor orientando a liberar o módulo no ChefWeb.
 
-## 7. Usuário sem permissão de relatórios (retorno vazio/erro por domínio ou por loja)
+## 7. Usuário sem permissão TOTAL (retorno vazio/erro por domínio ou por loja)
 
 - **Assinatura**: domínios inteiros (financeiro, estoque, clientes) voltam
   vazios ou com erro de permissão em um grupo, enquanto vendas funciona; ou,
   por loja: `CapaVenda/ListPorDataMovimento: 20: O usuário não possui acesso
   a loja solicitada.` (observado em 25/09/2026 numa loja de uma rede cujas
   demais funcionavam — a permissão precisa ser replicada loja a loja).
-- **Causa**: o usuário da API precisa de **permissão de acesso total aos
-  relatórios** no ChefWeb, **replicada em todas as lojas** da rede.
+- **Causa**: o usuário da API precisa de **permissão TOTAL** no ChefWeb —
+  não basta liberar os relatórios —, **replicada em todas as lojas** da rede,
+  uma a uma.
 - **Classificação**: persistente (de configuração).
 - ⚠️ **Efeito colateral grave (corrigido em 28/09/2026)**: como a busca percorre
   as lojas em ordem, a exceção de UMA loja abortava o domínio inteiro e todas
@@ -198,3 +199,95 @@ Classificação usada:
   1 retentativa automática após a pausa do throttle. Falhas em **duas lojas
   diferentes sem nenhum sucesso** interrompem a execução (indicam problema
   geral: janela, credencial ou API fora do ar).
+
+## 9. Relatório 41 (Listagem de Inventário): defeitos da exportação
+
+Não são erros de API — são defeitos da tela do ChefWeb que afetam a importação
+do inventário (`scripts/inventario.mjs`), usada para calcular CMV real de
+períodos anteriores à instalação.
+
+- **Exportação em CSV ignora as colunas arrastadas**: Loja, Data e
+  Nº Inventário são *agrupadores* por padrão; mesmo depois de arrastados para
+  a tabela e visíveis na tela, a exportação em CSV sai sem eles. Sem essas
+  colunas todas as contagens do período saem misturadas, sem nada que
+  identifique a qual inventário cada linha pertence.
+  - **Classificação**: persistente (defeito do sistema).
+  - **Autofix**: nenhum possível pelo cliente. A orientação é **exportar em
+    Excel**, onde as colunas saem corretamente. O importador detecta a ausência
+    e recusa o arquivo com a explicação, aceitando `--loja` e `--data` como
+    saída manual para um arquivo de contagem única.
+
+- **Produto sem nome desloca a linha inteira uma coluna** (vale para Excel
+  **e** CSV): quando o produto não tem nome no cadastro, a Qtde Contada
+  aparece na coluna *Produto* e a coluna *Qtde Contada* fica vazia. Numa
+  amostra real, 106 de 697 linhas (21 produtos).
+  - **Sintoma se não tratado**: esses itens entram no inventário com
+    quantidade nula e o estoque sai subestimado — em silêncio, que é o pior
+    tipo de erro. Na amostra, 832 unidades sumiriam.
+  - **Autofix**: `inventario.mjs` detecta a linha (quantidade vazia + nome
+    numérico) e recupera o valor, **mas só quando a aritmética confirma**
+    (`contada − atual = diferença`), para não estragar um produto que
+    legitimamente se chame "123". O comando informa quantas linhas corrigiu.
+
+- **Rodapé de totais**: a última linha traz a contagem de registros na primeira
+  coluna e a soma dos valores, sem produto. É descartada por não ter código de
+  produto inteiro.
+
+## 10. Codificação e espaços nos textos da API
+
+A API devolve texto acentuado corretamente em UTF-8 — uma varredura de todas as
+colunas de texto do banco (30/09/2026) **não encontrou nenhum mojibake**. Os
+problemas são outros dois, e ambos produzem número errado com cara de certo:
+
+- **Entidades HTML não decodificadas**, às vezes escapadas duas vezes:
+  `MAT&#201;RIA PRIMA` convivendo com `MATÉRIA PRIMA`, `SA&AMP;#205;DAS` com
+  `SAÍDAS`. O mesmo plano de contas vira dois nos agrupamentos da DRE, com o
+  gasto dividido, e escapa dos filtros por categoria — R$ 70 mil ficavam de
+  fora numa base real.
+- **Espaço à direita** em descrições (`"TICKET "`, `"MAESTRO "`). Quebra em
+  silêncio qualquer junção por igualdade de texto: 8 mil pagamentos ficavam sem
+  categoria por causa de um espaço invisível.
+
+- **Classificação**: persistente (característica da API).
+- **Autofix**: `decodificarEntidades()` em `sincronizar.mjs` roda dentro de
+  `campo()` — o **ponto único** por onde todo valor da API passa — decodificando
+  (até três passadas, para o escape duplo) e removendo espaço das pontas.
+  Tratar campo a campo deixava buracos, que foi como a descrição das contas a
+  pagar e o fornecedor das notas escaparam na primeira tentativa. O
+  `json_original` não passa por ali: continua sendo o retorno cru.
+  `criar-banco.mjs` normaliza o que já estava gravado, em migração idempotente.
+
+## 11. Tempo esgotado na CapaVenda (loja de movimento alto)
+
+- **Assinatura**: `TimeoutError` / "tempo esgotado" na busca de vendas; o
+  limite do cliente é de 300 s.
+- **Causa**: volume. Uma loja com ~300 cupons/dia não cabe numa busca de mês
+  inteiro.
+- **Classificação**: persistente enquanto a busca for mensal.
+- ⚠️ **Efeito colateral grave (corrigido em 30/09/2026)**: o tempo esgotado era
+  classificado como falha GERAL e contava para o freio de cinco falhas
+  seguidas. Numa loja movimentada, cinco meses seguidos derrubavam o domínio
+  **inteiro** — inclusive das lojas que estavam funcionando.
+- **Autofix**: passou a ser falha de DADOS (não arma o freio, fica registrada
+  para recuperação). E a loja é marcada: depois de **dois** tempos esgotados,
+  `lojas.coletar_dia_a_dia` liga e as vendas dela passam a ser buscadas um dia
+  por vez — permanentemente, com aviso ao gestor. Manual:
+  `lojas.mjs dia-a-dia --grupo <id> --loja <n> [--desligar]`.
+
+## 12. Senha do ChefWeb expirada (autenticação recusada)
+
+- **Assinatura**: `GerarToken` responde `Sucesso: false` / sem `Token`;
+  nenhuma chamada do grupo passa.
+- **Causa**: o ChefWeb faz as senhas de usuário **expirarem periodicamente**.
+  É a causa mais comum de uma instalação que funcionava parar do nada — nada
+  mudou do lado do gestor.
+- **Classificação**: persistente (de configuração), mas com solução imediata.
+- ⚠️ Como a rotina diária roda sozinha, sem tratamento a falha passa
+  despercebida até alguém pedir um relatório e receber dado velho.
+- **Autofix**: `gerarToken()` marca o erro com `autenticacao = true` e já
+  devolve a saída prática na mensagem; `sincronizar.mjs` registra **alerta ao
+  gestor** e interrompe o grupo (nenhum outro domínio passaria). O gestor
+  resolve com `configurar.mjs senha --grupo <id>`, que abre a página local já
+  na tela do grupo — a senha nunca passa pelo chat nem pela linha de comando.
+- Se a senha estiver correta e o acesso continuar recusado, ver o item 7:
+  o usuário precisa de **permissão total**, replicada loja a loja.

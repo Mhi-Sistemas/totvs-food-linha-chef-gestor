@@ -89,7 +89,18 @@ export async function gerarToken(config) {
     }),
   });
   if (dados.Sucesso === false || !dados.Token) {
-    throw new Error(`Autenticação recusada pela API: ${formatarErros(dados.Erros)}`);
+    // A SENHA DO CHEFWEB EXPIRA de tempos em tempos. Quando isso acontece a
+    // coleta de um gestor que estava funcionando para do nada, sem que ele
+    // tenha mudado coisa alguma — e como a rotina roda sozinha, a falha passa
+    // despercebida ate alguem pedir um relatorio. Por isso o erro ja vem com a
+    // saida pratica, e nao so com a recusa.
+    const detalhe = formatarErros(dados.Erros);
+    const erro = new Error(`Autenticação recusada pela API: ${detalhe}\n`
+      + 'A senha do ChefWeb expira de tempos em tempos — pode ser só isso. '
+      + 'Para atualizar: node --no-warnings scripts/configurar.mjs senha'
+      + (config.id ? ` --grupo ${config.id}` : ''));
+    erro.autenticacao = true;
+    throw erro;
   }
   return { token: dados.Token, expiraEm: dados.DataExpiracao };
 }

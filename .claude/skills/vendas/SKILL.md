@@ -15,6 +15,15 @@ Referências obrigatórias: `docs/dicionario-de-dados.md` (qual campo usar —
 ex.: dia = `data_movimento`, hora = `data_hora`, faturamento = `valor_total`)
 e `docs/catalogo-metricas.md` (fórmulas oficiais dos indicadores).
 
+
+## Conferência obrigatória antes de responder
+
+Rode `node --no-warnings scripts/analisar.mjs completude --de ... --ate ...`
+**antes** de qualquer número de vendas. Se acusar dias faltando ou incompletos,
+conte ao gestor o tamanho do buraco e ofereça buscar o que falta; só siga com a
+análise se ele aceitar. Já aconteceu de um gestor decidir com a receita 38%
+menor que a real — é o que esta conferência existe para evitar.
+
 ## Regras de cálculo (padrão do projeto)
 
 - **Sempre exclua vendas canceladas**: `WHERE cancelada = 0`.

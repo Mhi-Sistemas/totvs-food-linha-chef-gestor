@@ -118,6 +118,30 @@ alerta de **arrumação de cadastro**, ofereça a lista completa
 e-mail do suporte (grave em `data/suporte.json`, chave `email_suporte`) e
 envie com `email.mjs enviar` **somente após aprovação explícita**.
 
+## Antes de entregar número de vendas (obrigatório)
+
+**Nunca entregue análise, painel, relatório ou DRE de um período com dias
+faltando ou incompletos sem avisar o gestor antes.** A API às vezes devolve o
+dia PARCIAL respondendo "sucesso" — já aconteceu de um dia cujo caixa fechou em
+R$ 4,8 mil voltar com uma única venda, e o assistente gerar DRE e CMV sobre
+isso sem nenhuma ressalva. Numa loja, a receita do mês saiu 38% menor que a
+real, e o gestor decidiu em cima de número errado.
+
+Antes de qualquer entrega de vendas:
+
+```
+node --no-warnings scripts/analisar.mjs completude --de AAAA-MM-DD --ate AAAA-MM-DD [--grupo <id>]
+```
+
+Ele compara, dia a dia e loja a loja, as vendas coletadas com o **fechamento de
+caixa** (que vem de outro endpoint e bate com o relatório do próprio ChefWeb) e
+acusa dois tipos de buraco: dia nunca buscado e dia que veio abaixo de 85% do
+caixa. Sai com código 3 quando encontra problema.
+
+Se houver buraco: **conte ao gestor primeiro**, com o tamanho do problema;
+**ofereça buscar o que falta**; e **só gere a análise se ele aceitar**. Painel e
+DRE já imprimem a ressalva sozinhos, mas ela não substitui o aviso na conversa.
+
 ## Regras essenciais
 
 1. **Sempre em português do Brasil**, sem jargão técnico. Valores como R$ 1.234,56,
@@ -178,9 +202,28 @@ envie com `email.mjs enviar` **somente após aprovação explícita**.
      vez; `progresso [--abrir]` gera o relatório HTML de progresso da carga,
      regenerado sozinho ao fim de cada coleta — mostre-o quando o gestor
      perguntar "como está a carga?")
-   - `node --no-warnings scripts/analisar.mjs qualidade|anomalias|variacao|benchmark|cesta|simular`
+   - `node --no-warnings scripts/analisar.mjs qualidade|cmv|anomalias|variacao|benchmark|cesta|simular|fiscal`
      (camada de inteligência: o que fugiu do padrão, por que mudou, onde há
-     oportunidade — leia `.claude/skills/insights/SKILL.md`)
+     oportunidade — leia `.claude/skills/insights/SKILL.md`. `qualidade` traz o
+     alerta de custo incoerente — fator de conversão errado na entrada da
+     mercadoria; `cmv` calcula o CMV real escolhendo a melhor fonte de estoque)
+   - `node --no-warnings scripts/configurar.mjs senha [--grupo <id>]`
+     (**a senha do ChefWeb expira**: abre a página local já na tela do grupo
+     para o gestor digitar a nova — nunca peça a senha pelo chat. O usuário
+     também precisa de **permissão total**, replicada em todas as lojas)
+   - `node --no-warnings scripts/reportar.mjs verificar | situacao`
+     (acompanhamento dos relatos: a rotina diária consulta sozinha o que a
+     equipe resolveu ou respondeu e transforma em alerta ao gestor; `situacao`
+     responde "e aquele problema que eu relatei?")
+   - `node --no-warnings scripts/dre.mjs cmv-fonte [teorico|real|compras] [--grupo]`
+     (**qual CMV aparece na DRE é escolha do GESTOR** — explique as três e
+     pergunte, usando `docs/ajuda/como-calculamos-o-cmv.md`; sem argumento o
+     comando mostra a escolha atual e as opções)
+   - `node --no-warnings scripts/inventario.mjs importar --arquivo <planilha>`
+     (inventário contado no ChefWeb, relatório "41 - Listagem de Inventário" —
+     destrava o CMV real de meses anteriores à instalação, já que a API só
+     devolve a posição de estoque de hoje. Exportar em EXCEL, nunca em CSV;
+     passo a passo com imagens em `docs/ajuda/exportar-inventario.md`)
    - `node --no-warnings scripts/calendario.mjs` e `scripts/decisoes.mjs`
      (contexto de feriados/eventos e diário de decisões com verificação)
    - `node --no-warnings scripts/rotina.mjs executar|ativar|desativar|status`

@@ -278,10 +278,12 @@ function telaFormulario({ valores = {}, mensagemErro = null, editando = false } 
       <p>É o mesmo usuário que você usa para entrar no portal ChefWeb
       (chefweb.chef.totvs.com.br). Se não tiver, peça a quem administra o sistema
       na sua empresa.</p>
-      <p><strong>Importante:</strong> esse usuário precisa ter <strong>permissão de
-      acesso total aos relatórios</strong> no ChefWeb — e, se o grupo tem mais de uma
-      loja, essa permissão deve estar <strong>replicada em todas as lojas</strong>.
-      Sem isso, as consultas podem voltar vazias ou incompletas.</p></details>
+      <p><strong>Importante:</strong> esse usuário precisa ter <strong>permissão
+      total</strong> no ChefWeb, <strong>replicada em todas as lojas</strong>, uma a uma.
+      Não basta liberar os relatórios: sem permissão total as consultas voltam
+      vazias ou incompletas — e em silêncio, sem mensagem de erro.</p>
+      <p><strong>A senha do ChefWeb expira de tempos em tempos.</strong> Quando
+      isso acontecer, volte aqui e edite este grupo para informar a nova.</p></details>
 
     <label for="senha">Senha${editando ? ' <span style="font-weight:400;color:#6b7280">(deixe em branco para manter a atual)</span>' : ''}</label>
     <input id="senha" name="senha" type="password" ${editando ? '' : 'required'} autocomplete="current-password">
@@ -661,7 +663,7 @@ function mostrarStatus() {
 // ---------- modo desanexado ----------
 // Sobe o servidor num processo proprio, espera ele anunciar o endereco e sai.
 // Assim o limite de tempo do assistente que chamou nao mata a pagina.
-function abrirDesanexado() {
+function abrirDesanexado(rotaInicial = '') {
   if (lerEstado()) {
     const e = lerEstado();
     console.log(`A página de configuração já está aberta em ${e.endereco}`);
@@ -702,6 +704,31 @@ function abrirDesanexado() {
 const acao = process.argv[2];
 if (acao === 'status') {
   mostrarStatus();
+} else if (acao === 'senha' && !process.argv.includes('--servidor')) {
+  // Atalho para o caso mais comum de reconfiguracao: a senha do ChefWeb
+  // expirou. Abre a pagina JA na edicao do grupo, para o gestor so digitar a
+  // nova — a senha nunca passa pelo chat nem pela linha de comando.
+  const i = process.argv.indexOf('--grupo');
+  const alvo = i > 0 ? process.argv[i + 1] : null;
+  const conexoes = carregarConexoes();
+  if (conexoes.length === 0) {
+    console.error('Nenhum grupo de lojas configurado ainda — use "configurar" em vez de "senha".');
+    process.exitCode = 1;
+  } else if (!alvo && conexoes.length > 1) {
+    console.error('Você tem mais de um grupo. Diga de qual é a senha:');
+    for (const c of conexoes) console.error(`  --grupo ${c.id}   (${c.nome ?? c.id})`);
+    process.exitCode = 1;
+  } else {
+    const id = alvo ?? conexoes[0].id;
+    if (!conexoes.some((c) => c.id === id)) {
+      console.error(`Grupo "${id}" não encontrado. Disponíveis: ${conexoes.map((c) => c.id).join(', ')}`);
+      process.exitCode = 1;
+    } else {
+      console.log('Vou abrir a página segura no navegador, já na tela deste grupo.');
+      console.log('O gestor digita a senha nova lá — ela não passa por aqui nem pelo chat.');
+      abrirDesanexado(`/editar?id=${encodeURIComponent(id)}`);
+    }
+  }
 } else if (!process.argv.includes('--servidor') && !process.argv.includes('--anexado')) {
   abrirDesanexado();
 } else {
@@ -716,10 +743,17 @@ if (acao === 'status') {
     }, null, 2)}\n`, 'utf8');
     process.on('exit', limparEstado);
 
+    // "configurar.mjs senha --grupo X" abre direto na edicao daquele grupo: o
+    // gestor cai na tela certa em vez de ter de encontrar o grupo na lista.
+    const iGrupo = process.argv.indexOf('--grupo');
+    const destino = process.argv.includes('senha') && iGrupo > 0 && process.argv[iGrupo + 1]
+      ? `${endereco}editar?id=${encodeURIComponent(process.argv[iGrupo + 1])}`
+      : endereco;
+
     if (!process.argv.includes('--sem-navegador')) {
-      abrirNoSistema(endereco, (erro) => {
+      abrirNoSistema(destino, (erro) => {
         console.warn(`Não consegui abrir o navegador automaticamente (${erro.message}).`);
-        console.warn(`Peça ao gestor para abrir: ${endereco}`);
+        console.warn(`Peça ao gestor para abrir: ${destino}`);
       });
     }
     // O limite e de INATIVIDADE, nao de duracao total: cada interacao do gestor

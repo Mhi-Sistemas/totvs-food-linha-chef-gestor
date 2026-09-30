@@ -334,6 +334,9 @@ na casa).
 | `preco_venda` | `PrecoVenda` | Preço de venda ATUAL do cadastro (a venda histórica usa `venda_itens.valor_unitario`). |
 | `preco_compra` | `PrecoCompra` | Custo ATUAL do cadastro. Para CMV histórico use `venda_itens.preco_compra` (custo da época). |
 | `unidade` | `UnidadeVenda` | UN, KG, LT... Produtos KG são os de venda por peso. |
+| `unidade_compra` | `UnidadeCompra` | Unidade da EMBALAGEM comprada (CX, FD, BD...). **`unidade_compra <> unidade` é o sinal de erro de fator de conversão**: o custo cadastrado acaba sendo o da caixa inteira, não o da unidade de consumo. |
+| `fator_compra` | `FatorCompra` | Unidades de consumo por embalagem comprada. ⚠️ A API devolve **sempre NULL** (validado em 30/09/2026 nos dois grupos de teste), por isso a detecção de custo incoerente é heurística e não pode simplesmente ler o fator. |
+| `eh_adicional` | — (derivado) | 1 = o produto aparece na lista `Adicionais` de algum outro, ou seja, é item filho. Recalculado a cada sincronização do catálogo (o filho não se declara; descobre-se pelo principal). Adicional com preço 0/0,01 tem custo alto POR DESENHO — exclua-o de alertas de custo. |
 | `composto`, `processado`, `pesavel`, `exibir_no_cardapio` | `ProdutoComposto`, `Processado`, `Pesavel`, `NaoExibirNoCardapio` | Tipo de cadastro — ver tabela acima. |
 | — (json) | `Composicoes[]` | **Ficha técnica** do produto: lista de insumos `{CodigoProduto, NomeProduto, QuantidadeComposicao}`. Base do **CMV teórico**: custo = Σ(quantidade do insumo × `preco_compra` do insumo). |
 | — (json) | `Adicionais[]` | Produtos adicionais vinculáveis a este principal `{CodigoProduto, QuantidadeAdicionais}` (sabores, tamanhos, componentes de combo). |
@@ -363,7 +366,16 @@ promoção no payload). Consequências para análise:
 | `data_leitura` | — (data da sincronização) | Dia da FOTOGRAFIA. Posição atual = `MAX(data_leitura)`. Comparar duas leituras = evolução. |
 | `codigo_produto` | `skuId` | ⚠️ A API de estoque responde em inglês e NÃO traz nome/custo — **join obrigatório com `produtos`**. |
 | `quantidade` | `quantity` | Saldo. Negativo = erro de lançamento (alerta de processo, não número real). |
-| `custo` | — | Sempre NULL nesta API; use `produtos.preco_compra`. |
+| `custo` | — | A API **não** devolve custo. A partir da v1.0.8 a coluna é preenchida na própria coleta com o `produtos.preco_compra` **daquele dia** — custo CONGELADO na foto. Isso é essencial porque o catálogo é sobrescrito a cada sincronização e o custo antigo se perde: sem congelar, a foto de setembro sairia valorizada pelo custo de dezembro. **Para valorizar estoque histórico use `estoque_posicoes.custo`**, não o cadastro atual. Fotos anteriores à v1.0.8 foram preenchidas retroativamente com o custo vigente na migração (melhor aproximação disponível). |
+
+## 10b. Contas a pagar — marcas que mudam o que pode ser somado
+
+| Coluna | Campo API | O que é |
+|---|---|---|
+| `deletado` | `Deletado` | 1 = lançamento **apagado no ChefWeb**. ⚠️ **Nunca some sem filtrar**: na base de teste eram 116 lançamentos, R$ 81 mil, entrando nas despesas da DRE. |
+| `compra` | `Compra` | 1 = o lançamento é uma compra (não uma despesa recorrente). Marca nativa do ChefWeb, útil para conferir a categorização de planos. |
+| `investimento` | `Investimento` | 1 = imobilizado/investimento — não é mercadoria vendida nem despesa operacional. |
+| `data_registro` | `DataRegistro` | Quando o lançamento foi criado no sistema. Para período contábil use `data_competencia` (com recuo para `data_emissao`), que é o critério da DRE. |
 
 ## 11. Regras de ouro (resumo para consultas)
 
@@ -379,5 +391,20 @@ promoção no payload). Consequências para análise:
 3. Conta em aberto → `data_pagamento IS NULL`; sem data → NULL (nunca '0001-01-01').
 4. Livro caixa: saldo = entradas − saídas (o campo `valor` é sempre positivo).
 5. Estoque e nome de produto: sempre via join com `produtos`.
-6. Custo: histórico → `venda_itens.preco_compra`; atual → `produtos.preco_compra`;
-   0 = "não cadastrado".
+6. Custo: histórico por venda → `venda_itens.preco_compra`; **valorização de
+   estoque numa data → `estoque_posicoes.custo`** (congelado na foto); atual do
+   cadastro → `produtos.preco_compra`; 0 = "não cadastrado". Nunca valorize
+   fotografia antiga pelo cadastro de hoje — o catálogo é sobrescrito.
+7. **Compras para o CMV**: `contas_pagar` por `data_competencia`, filtrado
+   pelos planos marcados como `mercadoria` (`plano_categorias`) e com
+   `deletado = 0`. **Não use `notas_fiscais` tipo entrada**: a NF-e de entrada
+   traz equipamento, utensílio e serviço junto da mercadoria, e ainda inclui
+   transferências entre lojas do mesmo grupo — na base de teste isso inflava as
+   compras em 35%. A API do ChefWeb não tem endpoint de compras; o lançamento
+   já classificado pelo gestor é a melhor aproximação.
+8. Custo absurdo (água a R$ 18, pote a R$ 518) quase sempre é **fator de
+   conversão não preenchido** na entrada da mercadoria: o custo é o da
+   embalagem inteira. Sinal: `unidade_compra <> unidade`. Rode
+   `analisar.mjs qualidade` antes de confiar em CMV ou margem, e **desconsidere
+   os adicionais de preço 0/0,01** — neles o custo alto é estratégia
+   comercial, não defeito.

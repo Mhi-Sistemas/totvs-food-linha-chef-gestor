@@ -9,6 +9,142 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.8] — 30/09/2026
+
+### Novidades
+
+- **Agora dá para saber o CMV real de meses que já passaram.** Até aqui, o
+  custo da mercadoria vendida só podia ser calculado a partir do dia em que
+  você instalou o assistente — o sistema da TOTVS informa quanto você tem em
+  estoque hoje, mas nunca quanto tinha numa data anterior, e sem isso não há
+  conta a fazer. A saída é o inventário que você já conta no ChefWeb: peça ao
+  assistente e ele ensina a exportar a contagem do primeiro e do último dia do
+  mês, importa para você e fecha o CMV do período. De quebra, o inventário
+  revela o custo que cada produto tinha naquela data — informação que o
+  cadastro não guarda. Pergunte "qual foi meu CMV em agosto?" que ele diz de
+  onde tirou cada ponta da conta e avisa quando alguma contagem estiver
+  incompleta demais para confiar.
+
+- **Aviso de custo fora da realidade.** O assistente passou a conferir o custo
+  cadastrado dos seus produtos e avisar quando algum está claramente errado —
+  uma água a R$ 18,00, um pote plástico a R$ 518,00. Quase sempre a causa é a
+  conversão da embalagem na entrada da mercadoria: comprou-se a caixa com mil
+  potes e o sistema ficou entendendo que cada pote custa o valor da caixa
+  inteira. Custo errado contamina o CMV, a margem e o valor do seu estoque, e
+  esse é o tipo de erro difícil de perceber olhando relatório. Pergunte "meus
+  custos estão certos?" e ele traz a lista com o que conferir no ChefWeb, item
+  por item. Produtos adicionais com preço promocional de R$ 0,00 ou R$ 0,01
+  ficam fora da lista: neles o custo alto é proposital, não defeito.
+
+- **Você escolhe qual CMV aparece na sua DRE.** Existem três formas de calcular
+  o custo da mercadoria vendida, e elas dão números diferentes — por isso a
+  escolha passou a ser sua, não do assistente. Pode ser o **teórico** (pela
+  ficha técnica, funciona desde o primeiro dia mas não enxerga desperdício), o
+  **real** (estoque inicial + compras − estoque final, que é o consumo de
+  verdade e revela a perda) ou o **valor das compras de mercadoria** lançadas
+  no seu plano de contas (que bate com o extrato). Pergunte ao assistente
+  "qual CMV a DRE está usando?" e ele explica cada um e troca para o que você
+  preferir. Se num mês faltar informação para o que você escolheu, a DRE usa o
+  teórico só naquele mês e avisa na nota do relatório.
+
+- **Você fica sabendo quando resolvem o que você relatou.** Antes, ao enviar um
+  problema ou uma ideia para a equipe, só dava para saber o desfecho voltando
+  ao site. Agora o assistente acompanha sozinho, todo dia, e avisa na conversa
+  seguinte quando alguém responde ou resolve — sem você precisar de conta em
+  lugar nenhum. Pergunte "e aquele problema que eu relatei?" e ele mostra a
+  situação de tudo o que você já enviou.
+
+- **O assistente agora confere se os dados do período estão completos antes de
+  responder.** O sistema da TOTVS às vezes entrega um dia pela metade dizendo
+  que deu tudo certo — houve caso de um dia cujo caixa fechou em R$ 4,8 mil vir
+  com uma única venda. Sem perceber isso, o assistente montava painel, DRE e
+  CMV sobre dados faltando, e numa loja a receita do mês apareceu 38% menor que
+  a real. Agora ele compara, dia a dia e loja a loja, as vendas com o
+  fechamento de caixa, e **avisa você antes de gerar qualquer análise** quando
+  falta alguma coisa: diz quantos dias faltam, de quais lojas e quanto isso
+  representa em reais. Se você decidir seguir assim mesmo, a ressalva sai
+  impressa no próprio painel e na própria DRE — para que ninguém que leia o
+  relatório depois tome a decisão sem saber.
+
+- **Lojas de movimento alto passam a ser buscadas dia a dia, sozinhas.** Quando
+  a loja vende muito, o sistema da TOTVS não consegue entregar um mês inteiro
+  de uma vez: a busca estoura o tempo e volta vazia, e o histórico daquela loja
+  ficava para trás sem ninguém perceber. Agora o assistente reconhece isso
+  depois da segunda vez e **muda a estratégia daquela loja para sempre**,
+  buscando um dia por vez. Fica mais demorado, mas o dado vem completo — e ele
+  te avisa quando faz essa troca.
+
+- **Os dias que vieram incompletos são buscados de novo, sozinhos.** Detectar o
+  buraco não bastava: agora, todo dia, o assistente confere o último mês e põe
+  na fila os dias que vieram com menos vendas do que o caixa registrou,
+  rebuscando alguns por noite até fecharem. O dia que resiste a três tentativas
+  deixa de ser problema de coleta e vira aviso: é defeito do lado da TOTVS, e o
+  assistente oferece montar o texto do chamado para o suporte deles. A lista do
+  que já foi baixado passou a mostrar também quantos dias estão incompletos —
+  "dias buscados" não é a mesma coisa que "dias completos".
+
+- **A conferência dos dados agora cruza três fontes.** Além de comparar suas
+  vendas com o fechamento de caixa, o assistente passou a buscar também a lista
+  de cupons emitidos — uma terceira visão do mesmo movimento, que vem de outro
+  lugar do sistema da TOTVS. Quando as três concordam, o número é confiável;
+  quando divergem, ele te avisa antes de gerar qualquer relatório. Essa
+  terceira fonte tem uma vantagem: pode ser consultada a qualquer hora do dia,
+  enquanto as vendas antigas só de madrugada.
+
+- **Trocar a senha do ChefWeb ficou simples — e o assistente avisa quando
+  precisa.** A senha do ChefWeb expira de tempos em tempos, e quando isso
+  acontece a busca de dados para sozinha, sem você ter mudado nada: seus
+  relatórios passariam a mostrar informação velha sem aviso. Agora o assistente
+  percebe na hora e te avisa na conversa seguinte, já abrindo a página segura
+  para você digitar a senha nova (nunca pelo chat). Basta dizer "minha senha do
+  ChefWeb mudou".
+
+### Correções
+
+- **A DRE deixou de contar a compra de mercadoria duas vezes.** O valor gasto
+  com mercadoria aparecia na linha de CMV **e** de novo nas despesas
+  operacionais, subtraindo o mesmo dinheiro duas vezes e afundando o resultado
+  do mês (R$ 5.577 num único mês, no ambiente de testes). Agora a compra de
+  mercadoria fica só na linha de CMV. Na visão de caixa ela continua entre as
+  saídas, como deve ser: ali não existe linha de CMV, e o dinheiro saiu mesmo.
+
+- **Nomes vindos do sistema da TOTVS deixaram de aparecer duplicados ou
+  quebrados.** Alguns textos chegavam com códigos estranhos no meio
+  ("MAT&#201;RIA PRIMA") ou com um espaço invisível no fim ("MAESTRO "). O
+  efeito era silencioso e caro: o mesmo plano de contas virava dois na sua DRE,
+  com o gasto dividido entre eles, e formas de pagamento ficavam sem categoria
+  nas análises. Agora todo texto é limpo na entrada, e os dados já baixados
+  foram corrigidos — na base de testes, R$ 70 mil de "Matéria Prima" voltaram
+  para o lugar certo e 8 mil pagamentos voltaram a ser classificados.
+
+- **A busca não desiste mais de todas as lojas por causa de uma.** Quando uma
+  loja movimentada estourava o tempo de resposta várias vezes seguidas, o
+  assistente interrompia a busca daquele tipo de dado por inteiro — inclusive
+  das lojas que estavam funcionando normalmente. Agora o tempo esgotado é
+  tratado como característica daquela loja, não como problema geral.
+
+- **Lançamentos apagados no ChefWeb não entram mais nos seus relatórios.**
+  Contas que você excluiu no sistema continuavam sendo somadas nas despesas da
+  DRE. No ambiente de testes eram R$ 81 mil indevidos. Agora são ignoradas.
+
+### Melhorias
+
+- **As compras que entram no CMV passaram a vir do seu financeiro.** Antes o
+  assistente somava as notas fiscais de entrada, mas uma nota costuma trazer
+  equipamento, utensílio e material de limpeza junto da mercadoria — e isso
+  inflava o custo da comida com coisas que não são comida (35% a mais, nos
+  testes). Agora o cálculo usa as contas lançadas que você classificou como
+  compra de mercadoria. Se essa classificação ainda não existir, o assistente
+  pede que você confirme a lista antes de calcular, em vez de dar um número
+  errado.
+
+- **O custo passa a ser guardado junto com a fotografia do estoque.** Antes, o
+  valor do seu estoque de um dia passado era calculado com o custo de hoje — e
+  como o custo muda, a conta saía distorcida. Agora cada fotografia diária
+  guarda o custo daquele dia, e o CMV real do mês fecha com o custo que era
+  praticado no período. As fotografias já tiradas foram ajustadas com o melhor
+  valor disponível.
+
 ## [1.0.7] — 28/09/2026
 
 ### Novidades

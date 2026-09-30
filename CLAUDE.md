@@ -110,13 +110,24 @@ assistente"*, *"vou preparar seu computador"* — nunca "clonar o repositório",
    pelo tempo que o gestor precisar; acompanhe com `configurar.mjs status`.
    Avise que o teste das credenciais leva de 1 a 2 minutos (intervalo exigido
    pela TOTVS) e que ele não deve fechar a janela nesse tempo.
+1b. **A senha do ChefWeb EXPIRA de tempos em tempos.** Quando isso acontece a
+   coleta para sozinha, sem nada ter mudado do lado do gestor, e um alerta é
+   registrado. Atalho para resolver:
+   `node --no-warnings scripts/configurar.mjs senha [--grupo <id>]` — abre a
+   página local **já na tela daquele grupo**, para o gestor só digitar a nova.
+   **Nunca peça a senha pelo chat.** Se a senha estiver certa e o acesso
+   continuar recusado, o caminho é conferir se o usuário tem **permissão
+   total** no ChefWeb, replicada **em todas as lojas**, uma a uma (não basta
+   liberar relatórios).
 2. `node --no-warnings scripts/testar-conexao.mjs [--grupo <id>]` revalida os
    acessos já salvos.
 3. `node --no-warnings scripts/criar-banco.mjs` cria o banco local `data/chef.db` (SQLite).
 4. `node --no-warnings scripts/sincronizar.mjs --dominio <d> --de AAAA-MM-DD --ate AAAA-MM-DD`
-   baixa os dados da TOTVS para o banco local. Domínios: `vendas`, `fechamentos`,
-   `sangrias`, `provisao`, `contas-pagar`, `livro-caixa`, `notas-venda`,
-   `notas-entrada`, `produtos`, `estoque`, `clientes`, `tudo`.
+   baixa os dados da TOTVS para o banco local. Domínios: `vendas`,
+   `conferencia-vendas` (cupom a cupom — a testemunha que diz se as vendas
+   vieram completas, e sem trava de horário), `fechamentos`, `sangrias`,
+   `provisao`, `contas-pagar`, `livro-caixa`, `notas-venda`, `notas-entrada`,
+   `produtos`, `estoque`, `clientes`, `tudo`.
    Sincroniza **todos os grupos** por padrão; use `--grupo <id>` para um só.
    Repetir um período não duplica dados.
 5. `node --no-warnings scripts/consultar.mjs [--json] "SELECT ..."` executa consultas
@@ -155,11 +166,26 @@ assistente"*, *"vou preparar seu computador"* — nunca "clonar o repositório",
 9. `node --no-warnings scripts/abrir.mjs <arquivo>` abre um relatório/planilha
    no aplicativo padrão — **use sempre este comando**, nunca comandos de um
    sistema específico (o projeto roda em Windows e Mac).
-10. `node --no-warnings scripts/analisar.mjs qualidade|anomalias|variacao|benchmark|cesta|simular`
+10. `node --no-warnings scripts/analisar.mjs qualidade|cmv|anomalias|variacao|benchmark|cesta|simular|fiscal`
    é a **camada de inteligência**: detecta o que fugiu do padrão, explica por
    que mudou, compara lojas, acha oportunidade de venda e simula cenários.
-   Complementam: `calendario.mjs` (feriados e eventos que explicam variação) e
-   `decisoes.mjs` (registra o que foi recomendado e mede o efeito depois).
+   `qualidade` inclui o **alerta de custo incoerente** (custo unitário fora da
+   realidade, quase sempre fator de conversão errado na entrada da mercadoria —
+   a caixa de mil potes lançada como se fosse um pote); `cmv` calcula o **CMV
+   real** do período escolhendo sozinho a melhor fonte de estoque para cada
+   ponta. Complementam: `calendario.mjs` (feriados e eventos que explicam
+   variação) e `decisoes.mjs` (registra o que foi recomendado e mede o efeito
+   depois).
+10b. `node --no-warnings scripts/inventario.mjs importar --arquivo <planilha>`
+   traz para o banco o **inventário contado no ChefWeb** (relatório
+   "41 - Listagem de Inventário"). É o que **destrava o CMV real de meses
+   anteriores à instalação**: a API só devolve a posição de estoque de hoje,
+   então sem inventário não existe estoque inicial de um mês fechado. Peça ao
+   gestor a contagem do **primeiro e do último dia do mês** e conduza a
+   exportação pelo passo a passo com imagens em
+   `docs/ajuda/exportar-inventario.md` — **em Excel, nunca em CSV** (a
+   exportação CSV do ChefWeb perde as colunas de loja, data e nº do
+   inventário). `listar` mostra o que já foi importado.
 11. `node --no-warnings scripts/rotina.mjs executar|ativar|desativar|status` é a
    **rotina diária**: busca o movimento de ontem (D-1) de todos os grupos —
    recuperando sozinha os dias em que o computador ficou desligado —, tira a
@@ -203,6 +229,17 @@ assistente"*, *"vou preparar seu computador"* — nunca "clonar o repositório",
    --abrir` gera a **DRE gerencial** dinâmica (Mensal/Anual ×
    Competência/Caixa, cascata, plano de contas expansível, cobertura). Sem
    `--mes` = mês anterior fechado. Interprete ao entregar (skill `financeiro`).
+   **Qual CMV entra na DRE é ESCOLHA DO GESTOR, nunca sua**: `dre.mjs
+   cmv-fonte` sem argumento mostra a escolha atual e as três opções —
+   `teorico` (ficha técnica; funciona em qualquer período, mas não enxerga
+   desperdício nem desvio), `real` (estoque + compras; o consumo verdadeiro,
+   exige estoque nas duas pontas) e `compras` (planos de contas marcados como
+   compra de mercadoria; bate com o extrato, mas confunde comprar com
+   consumir). **Explique as três e pergunte** — o roteiro em linguagem de
+   gestor está em `docs/ajuda/como-calculamos-o-cmv.md`. Defina com
+   `dre.mjs cmv-fonte teorico|real|compras [--grupo <id>]`. Quando a fonte
+   escolhida não puder ser apurada num mês, a DRE recua para o teórico
+   **naquele mês** e diz isso na nota.
 17. `node --no-warnings scripts/painel.mjs gerar --spec <arquivo|-> [--abrir]`
    gera **dashboards** em `relatorios/`: monte a especificação (título, KPIs e
    gráficos com suas consultas — skill `dashboard`) e o gerador entrega o HTML
@@ -373,6 +410,15 @@ Como fazer, na ordem:
       envie o relato pendente. Daí em diante é tudo automático.
 6. Se o gestor não quiser criar conta, respeite e ofereça a alternativa:
    falar com o contato dele na MHI, levando o texto do relato.
+7. **O relato é acompanhado sozinho.** Todo envio bem-sucedido fica guardado
+   em `data/relatos.json`, e a **rotina diária consulta o estado de cada um**
+   (`reportar.mjs verificar`). Quando a equipe resolve ou responde, vira
+   **alerta** — e você conta ao gestor na conversa seguinte, como qualquer
+   outro alerta pendente: *"lembra do problema que você me contou? já foi
+   resolvido"*. A consulta de issue usa a API pública do GitHub e **funciona
+   sem o gestor ter conta**; discussão precisa do GitHub CLI autenticado.
+   `reportar.mjs situacao` lista o que ele já enviou e em que pé está — use
+   quando perguntarem "e aquele problema que eu relatei?".
 
 ## Persona e identidade visual (obrigatório)
 
@@ -416,12 +462,44 @@ para nunca recomeçar do zero:
 - Ao usar um aprendizado, trate-o como retrato do passado: se o gestor disser
   diferente hoje, o que ele disser vale — e atualize o arquivo.
 
+## Antes de entregar número de vendas (obrigatório)
+
+**Nunca entregue análise, painel, relatório ou DRE de um período com dias
+faltando ou incompletos sem avisar o gestor antes.** A API às vezes devolve o
+dia PARCIAL respondendo "sucesso" — já aconteceu de um dia cujo caixa fechou em
+R$ 4,8 mil voltar com uma única venda, e o assistente gerar DRE e CMV sobre
+isso sem nenhuma ressalva. Numa loja, a receita do mês saiu 38% menor que a
+real, e o gestor decidiu em cima de número errado.
+
+Antes de qualquer entrega de vendas:
+
+```
+node --no-warnings scripts/analisar.mjs completude --de AAAA-MM-DD --ate AAAA-MM-DD [--grupo <id>]
+```
+
+Ele compara, dia a dia e loja a loja, as vendas coletadas com o **fechamento de
+caixa** (que vem de outro endpoint e bate com o relatório do próprio ChefWeb) e
+acusa dois tipos de buraco: dia nunca buscado e dia que veio abaixo de 85% do
+caixa. Sai com código 3 quando encontra problema.
+
+Se houver buraco:
+
+1. **Conte ao gestor primeiro**, em linguagem simples e com o tamanho do
+   problema ("faltam 14 dias da loja Centro, cerca de 38% do movimento do mês").
+2. **Ofereça buscar o que falta** (`sincronizar.mjs --dominio vendas --de ... --ate ...`;
+   períodos de mais de 7 dias só na janela noturna — agende).
+3. **Só gere a análise se ele aceitar** seguir sabendo disso. Painel e DRE já
+   imprimem a ressalva sozinhos, mas ela não substitui o aviso na conversa.
+
 ## Antes de qualquer análise
 
 1. Verifique se o banco existe e se o período pedido já foi baixado:
    `SELECT dominio, MIN(periodo_inicio), MAX(periodo_fim), MAX(executado_em) FROM sync_log GROUP BY dominio`
 2. Se faltar dado do período, atualize primeiro (avise o gestor: "vou buscar os
    dados mais recentes no sistema, um instante").
+2b. **Confira a completude** (`analisar.mjs completude`) — ver a seção acima:
+   dado faltando ou parcial vira aviso ao gestor ANTES da entrega, nunca
+   depois.
 3. Confira o schema em `docs/banco-de-dados.md`. Regra de ouro: em análises de
    vendas, **exclua vendas canceladas** (`cancelada = 0`) e itens cancelados
    (`venda_itens.status = 1` são os ativos).

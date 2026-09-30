@@ -106,7 +106,8 @@ qualquer lugar e pedir: *"abra o assistente de gestão do TOTVS Food"*.
 | `npm não é reconhecido...` | Mesmo caso acima — o npm vem junto com o Node.js. |
 | O assistente diz que a versão do Node é antiga | Instale a versão **LTS** em <https://nodejs.org/pt> por cima da atual. |
 | Erro de permissão no Mac ao instalar | Tente `sudo npm install -g ...` e digite a senha do computador. |
-| As consultas voltam vazias ou incompletas | Seu usuário do ChefWeb precisa de **acesso total aos relatórios**, replicado **em todas as lojas**. Fale com seu contato TOTVS. |
+| As consultas voltam vazias ou incompletas | Seu usuário do ChefWeb precisa de **permissão total**, replicada **em todas as lojas** (uma a uma). Fale com seu contato TOTVS. |
+| O acesso parou de funcionar do nada | A senha do ChefWeb expira de tempos em tempos. Diga ao assistente "minha senha do ChefWeb mudou" — ele abre a página segura para você atualizar. |
 
 Travou em alguma coisa? Abra o assistente, cole a mensagem que apareceu e peça
 ajuda — ele mesmo te orienta, em português.

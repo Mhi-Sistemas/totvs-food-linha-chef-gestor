@@ -26,14 +26,24 @@
 // Uso:
 //   node --no-warnings scripts/reportar.mjs bug|melhoria|duvida \
 //        --titulo "resumo curto" --texto "descricao completa" [--simular]
+//   node --no-warnings scripts/reportar.mjs verificar   (a rotina diaria chama)
+//   node --no-warnings scripts/reportar.mjs situacao
+//
+// ACOMPANHAMENTO: todo relato enviado fica guardado em data/relatos.json, e a
+// rotina diaria consulta o estado dele. Quando o relato e resolvido ou
+// respondido, vira ALERTA para o assistente contar ao gestor na conversa
+// seguinte — ele nao precisa voltar ao site para saber que foi atendido.
+// A consulta de issue usa a API publica do GitHub (sem login), porque o
+// repositorio e publico; discussao exige o GitHub CLI autenticado.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, platform, release } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { EH_WINDOWS, EH_MAC, abrirNoSistema } from './plataforma.mjs';
 import { carregarConexoes } from './conexoes.mjs';
+import { registrarAlerta } from './alertas.mjs';
 
 // O GitHub CLI nem sempre e encontravel pelo PATH quando chamado sem shell
 // (em especial no Windows) — procura nos locais de instalacao conhecidos.
@@ -106,6 +116,143 @@ function idDoRepositorio() {
   return JSON.parse(saida).data.repository.id;
 }
 
+// ---------------------------------------------------------------------------
+// ACOMPANHAMENTO DOS RELATOS
+// ---------------------------------------------------------------------------
+
+const ARQUIVO_RELATOS = join(RAIZ, 'data', 'relatos.json');
+
+function lerRelatos() {
+  try { return JSON.parse(readFileSync(ARQUIVO_RELATOS, 'utf8')); } catch { return []; }
+}
+
+function salvarRelatos(lista) {
+  mkdirSync(join(RAIZ, 'data'), { recursive: true });
+  writeFileSync(ARQUIVO_RELATOS, `${JSON.stringify(lista, null, 2)}\n`, 'utf8');
+}
+
+// O numero do relato sai da propria URL devolvida pelo GitHub
+// (.../issues/42 ou .../discussions/17).
+function registrarRelato({ tipo, titulo, url, destino }) {
+  const numero = Number(String(url).match(/\/(\d+)(?:[#?].*)?$/)?.[1]);
+  if (!Number.isInteger(numero)) return;
+  const lista = lerRelatos();
+  if (lista.some((r) => r.numero === numero && r.destino === destino)) return;
+  lista.push({
+    tipo,
+    destino,
+    numero,
+    titulo,
+    url,
+    criado_em: new Date().toISOString().slice(0, 10),
+    estado: 'aberto',
+    respostas: 0,
+  });
+  salvarRelatos(lista);
+}
+
+// Estado de uma ISSUE pela API publica — sem login, porque o repositorio e
+// publico. E o caminho que funciona para todo gestor, tenha ele conta ou nao.
+async function estadoDaIssue(numero) {
+  const r = await fetch(`https://api.github.com/repos/${REPO}/issues/${numero}`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'assistente-chef' },
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  return {
+    estado: j.state === 'closed' ? 'resolvido' : 'aberto',
+    respostas: j.comments ?? 0,
+    // "not_planned" = fechada sem ser feita; merece frase diferente ao gestor.
+    naoPlanejado: j.state_reason === 'not_planned',
+  };
+}
+
+// Discussao exige GraphQL autenticado (nao ha REST publica para isso).
+function estadoDaDiscussao(numero) {
+  const [dono, nome] = REPO.split('/');
+  const consulta = `query { repository(owner:"${dono}", name:"${nome}") {
+      discussion(number: ${numero}) { answer { id } comments { totalCount } closed } } }`;
+  const saida = execFileSync(GH, ['api', 'graphql', '-f', `query=${consulta}`],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const d = JSON.parse(saida).data.repository.discussion;
+  return {
+    estado: (d.answer || d.closed) ? 'resolvido' : 'aberto',
+    respostas: d.comments?.totalCount ?? 0,
+    naoPlanejado: false,
+  };
+}
+
+const COMO_CHAMAR = { bug: 'problema', melhoria: 'ideia', duvida: 'dúvida' };
+
+async function verificar({ silencioso = false } = {}) {
+  const lista = lerRelatos();
+  const abertos = lista.filter((r) => r.estado === 'aberto');
+  if (abertos.length === 0) {
+    if (!silencioso) console.log('Nenhum relato aguardando resposta.');
+    return;
+  }
+  let mudou = false;
+  for (const r of abertos) {
+    let estado;
+    try {
+      estado = r.destino === 'issue'
+        ? await estadoDaIssue(r.numero)
+        : estadoDaDiscussao(r.numero);
+    } catch (erro) {
+      // Sem rede, sem CLI ou relato apagado: tenta de novo amanha. Nao vira
+      // alerta — o gestor nao tem nada a fazer com isso.
+      if (!silencioso) console.warn(`  não consegui consultar o nº ${r.numero}: ${String(erro.message).slice(0, 80)}`);
+      continue;
+    }
+    const comoChamar = COMO_CHAMAR[r.tipo] ?? 'relato';
+    if (estado.estado === 'resolvido') {
+      r.estado = 'resolvido';
+      r.resolvido_em = new Date().toISOString().slice(0, 10);
+      mudou = true;
+      registrarAlerta({
+        chave: `relato-${r.destino}-${r.numero}-resolvido`,
+        titulo: estado.naoPlanejado
+          ? `A equipe respondeu sobre ${comoChamar} que você relatou`
+          : `Resolveram ${comoChamar} que você relatou`,
+        detalhe: `"${r.titulo}" — enviado em ${r.criado_em.slice(8, 10)}/${r.criado_em.slice(5, 7)}/${r.criado_em.slice(0, 4)}.`,
+        orientacao: estado.naoPlanejado
+          ? `A equipe encerrou o assunto com uma explicação. Veja em ${r.url}`
+          : `Já está resolvido na versão mais nova do assistente. Detalhes em ${r.url}`,
+      });
+    } else if (estado.respostas > (r.respostas ?? 0)) {
+      r.respostas = estado.respostas;
+      mudou = true;
+      registrarAlerta({
+        chave: `relato-${r.destino}-${r.numero}-resposta-${estado.respostas}`,
+        titulo: `A equipe respondeu ${comoChamar} que você relatou`,
+        detalhe: `"${r.titulo}".`,
+        orientacao: `Leia a resposta em ${r.url}`,
+      });
+    }
+  }
+  if (mudou) salvarRelatos(lista);
+  if (!silencioso) {
+    const resolvidos = lista.filter((x) => x.estado === 'resolvido').length;
+    console.log(`${abertos.length} relato(s) consultado(s); ${resolvidos} já resolvido(s) no total.`);
+  }
+}
+
+function situacao() {
+  const lista = lerRelatos();
+  if (lista.length === 0) {
+    console.log('Nenhum relato enviado ainda por este computador.');
+    return;
+  }
+  console.log('RELATOS ENVIADOS');
+  for (const r of lista) {
+    const dia = `${r.criado_em.slice(8, 10)}/${r.criado_em.slice(5, 7)}/${r.criado_em.slice(0, 4)}`;
+    console.log(`  ${dia}  ${(COMO_CHAMAR[r.tipo] ?? r.tipo).padEnd(8)} `
+      + `${r.estado === 'resolvido' ? '✅ resolvido' : '⏳ aguardando'}  `
+      + `${String(r.titulo).slice(0, 48)}`);
+    console.log(`      ${r.url}`);
+  }
+}
+
 function lerArgs() {
   const args = {};
   const argv = process.argv.slice(3);
@@ -159,10 +306,17 @@ function ghAutenticado() {
   } catch { return false; }
 }
 
-const tipo = TIPOS[process.argv[2]];
+const acao = process.argv[2];
+const tipo = TIPOS[acao];
 const args = lerArgs();
-if (!tipo || typeof args.titulo !== 'string' || typeof args.texto !== 'string') {
+if (acao === 'verificar') {
+  await verificar({ silencioso: !!args.silencioso });
+} else if (acao === 'situacao') {
+  situacao();
+} else if (!tipo || typeof args.titulo !== 'string' || typeof args.texto !== 'string') {
   console.error('Uso: reportar.mjs bug|melhoria|duvida --titulo "resumo" --texto "descricao" [--simular]');
+  console.error('   |  reportar.mjs verificar   (consulta o que a equipe respondeu)');
+  console.error('   |  reportar.mjs situacao    (lista os relatos já enviados)');
   console.error('Lembrete: leia o texto para o gestor e só envie com a aprovação dele.');
   process.exitCode = 1;
 } else {
@@ -187,6 +341,8 @@ if (!tipo || typeof args.titulo !== 'string' || typeof args.texto !== 'string') 
       try {
         enviado = criarDiscussao(categoria.id, titulo, corpo);
         console.log(`Relato enviado como discussão em "${categoria.name}": ${enviado}`);
+        // Guarda para a rotina diaria acompanhar e avisar quando responderem.
+        registrarRelato({ tipo: acao, titulo, url: enviado, destino: 'discussao' });
       } catch (erro) {
         console.warn(`Não consegui abrir a discussão (${String(erro.message).slice(0, 120)}); `
           + 'registrando como issue.');
@@ -200,6 +356,7 @@ if (!tipo || typeof args.titulo !== 'string' || typeof args.texto !== 'string') 
           { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
         ).trim();
         console.log(`Relato enviado: ${url}`);
+        registrarRelato({ tipo: acao, titulo, url, destino: 'issue' });
       } catch (erro) {
         console.error(`Não consegui enviar pelo GitHub CLI: ${String(erro.stderr || erro.message).slice(0, 200)}`);
         process.exitCode = 1;

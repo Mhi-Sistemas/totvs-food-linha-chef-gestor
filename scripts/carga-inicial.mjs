@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { abrirBanco, criarSchema } from './criar-banco.mjs';
+import { conferirVendas } from './completude.mjs';
 import { carregarConexoes } from './conexoes.mjs';
 import { DOMINIOS, dominio as dominioInfo } from './dominios.mjs';
 
@@ -101,6 +102,21 @@ function situacao(grupos) {
           + ` (${Number(l.registros).toLocaleString('pt-BR')} registro(s))`);
       }
       if (!algum) console.log('  (nada baixado ainda)');
+      // "Dias buscados" nao e a mesma coisa que "dias completos": o servidor
+      // as vezes entrega o dia pela metade dizendo que deu certo. Mostrar so o
+      // que foi buscado daria uma sensacao de completude que nao existe.
+      const vendas = porDominio.get('vendas');
+      if (vendas?.de && vendas?.ate) {
+        try {
+          const c = conferirVendas(db, { conexao: g.id, de: vendas.de, ate: vendas.ate });
+          if (c.dias_incompletos.length > 0) {
+            console.log(`  ${'dias incompletos'.padEnd(22)} ${c.dias_incompletos.length} dia(s) `
+              + 'vieram com menos vendas do que o caixa registrou'
+              + (c.falta_pct ? ` (~${c.falta_pct.toFixed(1).replace('.', ',')}% do movimento)` : ''));
+            console.log(`  ${''.padEnd(22)} a rotina diária rebusca esses dias sozinha`);
+          }
+        } catch { /* sem testemunhas ainda */ }
+      }
       // O estado do historico sai SEMPRE, inclusive com o banco vazio: e a
       // deixa da conversa do passo 4, e e justamente no grupo recem-criado
       // que o gestor precisa ouvir a pergunta.

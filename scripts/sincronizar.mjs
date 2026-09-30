@@ -12,7 +12,8 @@
 //   node scripts/sincronizar.mjs --dominio estoque             (sem período: posição de hoje)
 //
 // Domínios: vendas, fechamentos, sangrias, provisao, contas-pagar, livro-caixa,
-//           notas-venda, notas-entrada, produtos, estoque, clientes, tudo
+//           conferencia-vendas, notas-venda, notas-entrada, produtos, estoque,
+//           clientes, tudo
 //
 // Rodar o mesmo período duas vezes não duplica dados (os registros do período
 // são substituídos).
@@ -27,13 +28,46 @@ import { registrarAlerta } from './alertas.mjs';
 // ---------- utilitários ----------
 
 // Busca um campo no registro ignorando maiúsculas/minúsculas.
+// O ChefWeb devolve alguns textos com ENTIDADES HTML nao decodificadas, as
+// vezes escapadas duas vezes: "MAT&#201;RIA PRIMA" e "SA&AMP;#205;DAS". O
+// efeito e pior do que feio — o mesmo plano de contas vira DOIS planos
+// diferentes nos agrupamentos da DRE, e qualquer filtro por nome perde uma das
+// grafias (na base de validacao, R$ 70 mil de "MATERIA PRIMA" ficavam de fora).
+// Duas passadas resolvem o escape duplo.
+// Tambem tira espaco das pontas: o ChefWeb devolve descricoes com espaco a
+// direita ("TICKET ", "MAESTRO "), e isso quebra em silencio qualquer juncao
+// por igualdade de texto — 8 mil pagamentos ficavam sem categoria por causa
+// de um espaco invisivel.
+function decodificarEntidades(texto) {
+  if (typeof texto !== 'string') return texto;
+  if (!texto.includes('&')) return texto.trim();
+  let t = texto;
+  for (let i = 0; i < 3 && t.includes('&'); i += 1) {
+    const antes = t;
+    t = t
+      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"').replace(/&apos;/gi, "'")
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&');
+    if (t === antes) break;
+  }
+  return t.trim();
+}
+
 function campo(registro, ...nomes) {
   if (!registro || typeof registro !== 'object') return null;
   const mapa = new Map(Object.keys(registro).map((k) => [k.toLowerCase(), k]));
   for (const nome of nomes) {
     const real = mapa.get(nome.toLowerCase());
     if (real !== undefined && registro[real] !== undefined && registro[real] !== null) {
-      return registro[real];
+      // Decodifica AQUI, no unico ponto por onde todo texto da API passa: o
+      // ChefWeb devolve entidades HTML espalhadas (e as vezes escapadas duas
+      // vezes), e tratar campo a campo deixaria buracos — foi o que aconteceu
+      // com a descricao das contas a pagar e o fornecedor das notas.
+      // `json_original` nao passa por aqui: continua sendo o retorno cru.
+      return decodificarEntidades(registro[real]);
     }
   }
   return null;
@@ -472,6 +506,76 @@ function limparPeriodo(db, config, tabela, colunaData, loja, de, ate) {
   ).run(...params);
 }
 
+// CONFERENCIA DE VENDAS — um registro por cupom emitido.
+//
+// E a terceira testemunha do movimento de um dia, ao lado da venda em si
+// (CapaVenda) e do fechamento de caixa. Serve para responder "a coleta de
+// vendas veio completa?" sem depender de uma fonte so.
+//
+// Duas particularidades validadas em 30/09/2026:
+//   - `ValorTotal` vem como TEXTO no formato "$39.80" (cifrao e ponto
+//     decimal), nao como numero;
+//   - o endpoint NAO tem a trava de horario das vendas: um dia de 84 dias
+//     atras foi buscado as 13h sem recusa. Da para conferir o historico a
+//     qualquer hora.
+async function sincronizarConferenciaVendas(db, config, de, ate, lojaArg) {
+  // "$1.234.567,89" ou "$39.80": tira o cifrao e resolve o separador decimal
+  // pelo que aparece por ultimo.
+  const valorDaApi = (txt) => {
+    const t = String(txt ?? '').replace(/[^0-9.,-]/g, '');
+    if (!t) return null;
+    let limpo = t;
+    if (t.includes(',') && t.includes('.')) {
+      limpo = t.lastIndexOf(',') > t.lastIndexOf('.')
+        ? t.replace(/\./g, '').replace(',', '.')
+        : t.replace(/,/g, '');
+    } else if (t.includes(',')) limpo = t.replace(',', '.');
+    const n = Number(limpo);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  let total = 0;
+  for (const loja of lojasAlvo(config, lojaArg)) {
+    try {
+      const corpo = { DataInicial: dataInicioISO(de), DataFinal: dataFimISO(ate) };
+      if (loja !== null) corpo.CodigoLoja = loja;
+      const resposta = await chamarGet(config, '/api/ConferenciaVendas/ListConferenciaVenda', corpo);
+      const lista = extrairLista(resposta) ?? [];
+      limparPeriodo(db, config, 'conferencia_vendas', 'data_caixa', loja, de, ate);
+      const ins = prepIns(db, config,
+        `INSERT OR REPLACE INTO conferencia_vendas
+         (codigo_loja, data_caixa, numero_caixa, numero_cupom, periodo, valor_total,
+          cpf_cnpj, chave, numero_nfce, status_nfce, motivo_rejeicao, modelo_fiscal, json_original)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      );
+      for (const r of lista) {
+        const dia = soDia(campo(r, 'DataCaixaOperacao', 'DataCaixa', 'Data'));
+        if (!dia) continue;
+        ins.run(
+          campo(r, 'Loja', 'CodigoLoja') ?? loja,
+          dia,
+          campo(r, 'NumeroCaixa') ?? 0,
+          campo(r, 'NumeroCupom') ?? 0,
+          campo(r, 'Periodo'),
+          valorDaApi(campo(r, 'ValorTotal', 'Valor')),
+          campo(r, 'CPFouCNPJ') || null,
+          campo(r, 'Chave', 'ChaveCFe') || null,
+          campo(r, 'NumeroNFCe') || null,
+          campo(r, 'StatusNFCe') || null,
+          campo(r, 'MotivoRejeicaoNFCe') || null,
+          campo(r, 'ModeloFiscal'),
+          JSON.stringify(r)
+        );
+        total += 1;
+      }
+      registrarSync(db, config, 'conferencia-vendas', loja, de, ate, lista.length);
+    } catch (erro) {
+      if (!registrarSemAcesso(config, loja, erro)) throw erro;
+    }
+  }
+  return total;
+}
+
 async function sincronizarSangrias(db, config, de, ate, lojaArg) {
   let total = 0;
   for (const loja of lojasAlvo(config, lojaArg)) {
@@ -554,8 +658,9 @@ async function sincronizarFinanceiro(db, config, de, ate, lojaArg, qual) {
         const ins = prepIns(db, config,
           `INSERT INTO contas_pagar
            (codigo_loja, fornecedor, descricao, data_emissao, data_vencimento, data_pagamento,
-            valor, valor_pago, plano_contas1, plano_contas2, data_competencia, pago, json_original)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+            valor, valor_pago, plano_contas1, plano_contas2, data_competencia, pago, json_original,
+            deletado, compra, investimento, data_registro)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?)`
         );
         // Payload real (validado): NumeroControle, Credor, Valor, PlanoContas1/2,
         // Pago, DataPagamento, ValorPagamento, DataVencimento, DataEmissao, Loja.
@@ -574,7 +679,14 @@ async function sincronizarFinanceiro(db, config, de, ate, lojaArg, qual) {
             campo(r, 'PlanoContas2') ?? null,
             soDia(campo(r, 'DataCompetencia')) ?? null,
             campo(r, 'Pago') ? 1 : 0,
-            JSON.stringify(r)
+            JSON.stringify(r),
+            // Deletado: o lancamento foi apagado no ChefWeb e nao pode entrar
+            // em soma nenhuma. Compra/Investimento separam mercadoria de
+            // imobilizado. DataRegistro e quando o lancamento foi criado.
+            r.Deletado ? 1 : 0,
+            r.Compra ? 1 : 0,
+            r.Investimento ? 1 : 0,
+            soDia(campo(r, 'DataRegistro')) ?? null
           );
           total += 1;
         }
@@ -688,7 +800,7 @@ async function sincronizarNotas(db, config, de, ate, lojaArg, tipo) {
         // guardamos o registro sem ele.
         const xml = campo(r, 'XML', 'XMLNota') ?? '';
         const { XML: _x1, XMLNota: _x2, Xml: _x3, xml: _x4, ...semXml } = r;
-        const emitente = xml.match(/<emit>[\s\S]*?<xNome>([^<]+)<\/xNome>/)?.[1] ?? null;
+        const emitente = decodificarEntidades(xml.match(/<emit>[\s\S]*?<xNome>([^<]+)<\/xNome>/)?.[1] ?? null);
         const valorNotaXml = xml.match(/<vNF>([\d.]+)<\/vNF>/)?.[1];
         ins.run(
           tipo,
@@ -724,10 +836,10 @@ async function sincronizarProdutos(db, config, lojaArg) {
       const ins = prepIns(db, config,
         `INSERT OR REPLACE INTO produtos
          (codigo, nome, unidade, codigo_grupo, grupo, codigo_subgrupo, subgrupo, preco_venda, preco_compra, ativo,
-          composto, processado, pesavel, exibir_no_cardapio,
+          composto, processado, pesavel, exibir_no_cardapio, unidade_compra, fator_compra,
           ncm, cfop_venda, cst_venda, csosn_venda, aliquota_venda, tributo_venda,
           cst_pis, cst_cofins, json_original)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?)`
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?)`
       );
       // Payload real (validado): CodigoProduto, DescricaoProduto, UnidadeVenda,
       // Grupo, SubGrupo, PrecoVenda, PrecoCompra, ProdutoComposto, Composicoes.
@@ -749,6 +861,10 @@ async function sincronizarProdutos(db, config, lojaArg) {
           campo(r, 'Processado') === true ? 1 : 0,
           campo(r, 'Pesavel') === true ? 1 : 0,
           campo(r, 'NaoExibirNoCardapio') === true ? 0 : 1,
+          // Embalagem de compra: unidade diferente da de venda com fator
+          // ausente denuncia custo lancado pela embalagem inteira.
+          campo(r, 'UnidadeCompra'),
+          campo(r, 'FatorCompra', 'FatorConversao'),
           // Cadastro fiscal: o que o produto DEVERIA tributar
           campo(r, 'NCM'),
           campo(r, 'CFOPVenda'), campo(r, 'CSTVenda'), campo(r, 'CSOSNVenda'),
@@ -764,6 +880,16 @@ async function sincronizarProdutos(db, config, lojaArg) {
       if (!registrarSemAcesso(config, loja, erro)) throw erro;
     }
   }
+  // Quem e adicional so se descobre olhando o catalogo inteiro: o produto
+  // filho nao se declara, ele APARECE na lista Adicionais do principal. Por
+  // isso a marca se recalcula ao fim, quando todas as lojas ja entraram.
+  db.prepare(`UPDATE produtos SET eh_adicional = 0 WHERE conexao = ?`).run(config.id);
+  db.prepare(`WITH adicionais AS (
+        SELECT DISTINCT json_extract(j.value, '$.CodigoProduto') AS cod
+          FROM produtos p, json_each(p.json_original, '$.Adicionais') j
+         WHERE p.conexao = ?)
+      UPDATE produtos SET eh_adicional = 1
+       WHERE conexao = ? AND codigo IN (SELECT cod FROM adicionais)`).run(config.id, config.id);
   return total;
 }
 
@@ -775,6 +901,16 @@ async function sincronizarEstoque(db, config, lojaArg) {
       const corpo = { Completa: true };
       if (loja !== null) corpo.CodigoLoja = loja;
       const resposta = await chamarGet(config, '/api/Estoque/ListarEstoque', corpo);
+      // A API do estoque devolve saldo, nao custo (skuId, lotId, quantity,
+      // locationId, stockType, updatedAt, unit) — a valorizacao vem do
+      // catalogo. E o catalogo e SOBRESCRITO a cada sincronizacao: sem
+      // congelar aqui, a foto de hoje seria valorizada pelo custo de meses
+      // depois, e o CMV real sairia errado. Por isso o custo do dia vai
+      // gravado dentro da propria foto.
+      const custoDoDia = new Map();
+      for (const p of db.prepare(
+        'SELECT codigo, preco_compra FROM produtos WHERE conexao = ? AND preco_compra IS NOT NULL'
+      ).all(config.id)) custoDoDia.set(Number(p.codigo), p.preco_compra);
       const lista = extrairLista(resposta) ?? [];
       prepDel(db, config,
         'DELETE FROM estoque_posicoes WHERE data_leitura = ?' + (loja !== null ? ' AND codigo_loja = ?' : '')
@@ -789,14 +925,17 @@ async function sincronizarEstoque(db, config, lojaArg) {
       // com a tabela produtos (skuId = codigo).
       for (const r of lista) {
         const codigoProduto = campo(r, 'skuId', 'CodigoProduto', 'Codigo');
+        const cod = codigoProduto !== null ? Number(codigoProduto) : null;
         ins.run(
           hoje,
           campo(r, 'locationId', 'CodigoLoja', 'IdLoja') ?? loja,
-          codigoProduto !== null ? Number(codigoProduto) : null,
+          cod,
           campo(r, 'NomeProduto', 'Nome', 'Descricao'),
           campo(r, 'unit', 'Unidade', 'UnidadeMedida'),
           campo(r, 'quantity', 'Quantidade', 'QuantidadeEstoque', 'Saldo'),
-          campo(r, 'Custo', 'PrecoCusto', 'CustoMedio'),
+          // Se um dia a API passar a mandar custo, ele prevalece; hoje o valor
+          // vem sempre do catalogo.
+          campo(r, 'Custo', 'PrecoCusto', 'CustoMedio') ?? custoDoDia.get(cod) ?? null,
           JSON.stringify(r)
         );
         total += 1;
@@ -852,7 +991,7 @@ async function sincronizarClientes(db, config, lojaArg) {
 // ---------- execução ----------
 
 const DOMINIOS_COM_PERIODO = [
-  'vendas', 'fechamentos', 'sangrias', 'provisao',
+  'vendas', 'conferencia-vendas', 'fechamentos', 'sangrias', 'provisao',
   'contas-pagar', 'livro-caixa', 'notas-venda', 'notas-entrada',
 ];
 const DOMINIOS_SEM_PERIODO = ['produtos', 'estoque', 'clientes'];
@@ -915,6 +1054,7 @@ async function main() {
   const executores = {
     'vendas': (d, a) => sincronizarVendas(db, config, d, a, args.loja),
     'fechamentos': (d, a) => sincronizarFechamentos(db, config, d, a, args.loja),
+    'conferencia-vendas': (d, a) => sincronizarConferenciaVendas(db, config, d, a, args.loja),
     'sangrias': (d, a) => sincronizarSangrias(db, config, d, a, args.loja),
     'provisao': (d, a) => sincronizarProvisao(db, config, d, a, args.loja),
     'contas-pagar': (d, a) => sincronizarFinanceiro(db, config, d, a, args.loja, 'contas-pagar'),
@@ -953,6 +1093,23 @@ async function main() {
     } catch (erro) {
       houveErro = true;
       console.error(`❌ ${alvo}${conexoes.length > 1 ? ` (${config.nome})` : ''}: ${erro.message}`);
+      // Autenticacao recusada para TUDO deste grupo, e a rotina diaria roda
+      // sozinha: sem alerta, o gestor so descobriria ao pedir um relatorio e
+      // ver dado velho. A causa mais comum e a senha do ChefWeb ter expirado.
+      if (erro.autenticacao) {
+        registrarAlerta({
+          chave: `credencial-${config.id}`,
+          titulo: `Não consegui entrar no sistema da TOTVS${conexoes.length > 1 ? ` (${config.nome})` : ''}`,
+          detalhe: 'O acesso foi recusado. A senha do ChefWeb expira de tempos em tempos — '
+            + 'na maioria das vezes é só isso, e nada mudou do seu lado. '
+            + 'Enquanto não for atualizada, os dados param de ser buscados e os relatórios '
+            + 'ficam com informação velha.',
+          orientacao: 'Diga "minha senha do ChefWeb mudou" que eu abro a página segura para você '
+            + 'digitar a nova — ela não passa pelo chat. Se a senha estiver certa, confira com '
+            + 'quem administra o ChefWeb se o usuário continua com permissão total em todas as lojas.',
+        });
+        break; // nenhum outro dominio deste grupo vai passar
+      }
       if (dominio !== 'tudo') break;
     }
   }

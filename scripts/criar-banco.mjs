@@ -289,6 +289,17 @@ CREATE TABLE IF NOT EXISTS produtos (
   processado INTEGER,           -- 1 = produzido (ficha técnica + estoque próprio)
   pesavel INTEGER,              -- 1 = vendido por peso (kg)
   exibir_no_cardapio INTEGER,   -- 0 = nao aparece na tela de venda (geralmente insumo)
+  -- Conversao da embalagem de COMPRA para a unidade de consumo. Quando a
+  -- unidade de compra difere da de venda e o fator nao esta configurado, o
+  -- custo cadastrado acaba sendo o da embalagem inteira — a caixa de 1.000
+  -- potes lancada como se fosse 1 pote. E a principal causa de custo
+  -- incoerente, e o que analisar.mjs qualidade denuncia.
+  unidade_compra TEXT,
+  fator_compra REAL,            -- unidades de consumo por embalagem comprada
+  -- 1 = o produto aparece na lista de Adicionais de algum outro (item filho).
+  -- Adicional com preco de venda 0 ou 0,01 e estrategia comercial: o custo
+  -- alto em relacao ao preco e ESPERADO e nao deve virar alerta.
+  eh_adicional INTEGER,
   -- Cadastro fiscal: o que o produto DEVERIA tributar (compara-se com o que
   -- a venda de fato tributou, em venda_itens).
   ncm TEXT,
@@ -317,6 +328,69 @@ CREATE TABLE IF NOT EXISTS estoque_posicoes (
   json_original TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_estoque_data ON estoque_posicoes (data_leitura);
+CREATE INDEX IF NOT EXISTS idx_estoque_cx_data_prod ON estoque_posicoes (conexao, data_leitura, codigo_produto);
+
+-- Conferencia de vendas: um registro por CUPOM emitido, direto do endpoint
+-- ConferenciaVendas. E a TERCEIRA testemunha do movimento de um dia (as outras
+-- sao a venda em si e o fechamento de caixa) — quando as tres concordam, o
+-- dado e confiavel; quando divergem, ha buraco de coleta.
+CREATE TABLE IF NOT EXISTS conferencia_vendas (
+  conexao TEXT NOT NULL DEFAULT 'principal',
+  codigo_loja INTEGER NOT NULL,
+  data_caixa TEXT NOT NULL,        -- dia da operacao (AAAA-MM-DD)
+  numero_caixa INTEGER NOT NULL,
+  numero_cupom INTEGER NOT NULL,
+  periodo INTEGER,
+  valor_total REAL,                -- veio como texto "$39.80" na API
+  cpf_cnpj TEXT,
+  chave TEXT,
+  numero_nfce TEXT,
+  status_nfce TEXT,                -- "EMISSAO NORMAL AUTORIZADA", rejeicoes...
+  motivo_rejeicao TEXT,
+  modelo_fiscal INTEGER,
+  json_original TEXT,
+  PRIMARY KEY (conexao, codigo_loja, data_caixa, numero_caixa, numero_cupom)
+);
+CREATE INDEX IF NOT EXISTS idx_conf_cx_dia ON conferencia_vendas (conexao, data_caixa, codigo_loja);
+
+-- Categorias dos planos de contas do gestor: quais sao gastos com PESSOAL
+-- (base do CMO) e quais sao COMPRA DE MERCADORIA (base das compras do CMV).
+-- Vive no schema principal — e nao mais criada sob demanda — porque virou
+-- dependencia de varios calculos, e a ausencia dela quebrava a DRE.
+CREATE TABLE IF NOT EXISTS plano_categorias (
+  plano1 TEXT NOT NULL,
+  plano2 TEXT NOT NULL DEFAULT '*',
+  categoria TEXT NOT NULL,
+  PRIMARY KEY (plano1, plano2)
+);
+
+-- Inventarios contados no ChefWeb, importados do relatorio 41 (Listagem de
+-- Inventario). Existem porque a API de estoque NAO devolve posicao retroativa:
+-- quem instala o assistente hoje nao tem como calcular o CMV real de um mes
+-- passado. O inventario do primeiro e do ultimo dia do mes fecham essa conta.
+CREATE TABLE IF NOT EXISTS inventarios (
+  conexao TEXT NOT NULL DEFAULT 'principal',
+  data TEXT NOT NULL,              -- dia da contagem (AAAA-MM-DD)
+  codigo_loja INTEGER NOT NULL,
+  numero TEXT NOT NULL DEFAULT '', -- numero do inventario no ChefWeb ('' se o export nao trouxe)
+  codigo_produto INTEGER NOT NULL,
+  nome_produto TEXT,
+  unidade TEXT,
+  quantidade_contada REAL,         -- coluna "Inventario": a contagem FISICA (e esta que vale)
+  quantidade_sistema REAL,         -- coluna "Estoque": o saldo que o sistema tinha
+  diferenca REAL,
+  valor_diferenca REAL,            -- coluna "Valor": valor da DIFERENCA, nao do estoque contado
+  -- valor_diferenca / diferenca = custo unitario praticado NA DATA da contagem.
+  -- Vale ouro: o catalogo da API e sobrescrito a cada sincronizacao, entao esta
+  -- e a unica fonte de custo historico que o ChefWeb entrega.
+  custo_unitario REAL,
+  motivo TEXT,
+  arquivo TEXT,                    -- de qual arquivo veio (rastreabilidade)
+  importado_em TEXT,
+  PRIMARY KEY (conexao, data, codigo_loja, numero, codigo_produto)
+);
+CREATE INDEX IF NOT EXISTS idx_inv_cx_data ON inventarios (conexao, data, codigo_loja);
+CREATE INDEX IF NOT EXISTS idx_inv_cx_prod ON inventarios (conexao, codigo_produto, data);
 
 -- Clientes cadastrados
 CREATE TABLE IF NOT EXISTS clientes (
@@ -465,6 +539,14 @@ const MIGRACOES = [
   "ALTER TABLE contas_pagar ADD COLUMN plano_contas2 TEXT",
   "ALTER TABLE contas_pagar ADD COLUMN data_competencia TEXT",
   "ALTER TABLE contas_pagar ADD COLUMN pago INTEGER",
+  // Marcas que vem no payload e mudam o que pode ser somado: Deletado (o
+  // lancamento foi apagado no ChefWeb e NAO pode entrar em conta nenhuma),
+  // Compra e Investimento (separam mercadoria de imobilizado), e a data em
+  // que o lancamento foi registrado no sistema.
+  "ALTER TABLE contas_pagar ADD COLUMN deletado INTEGER",
+  "ALTER TABLE contas_pagar ADD COLUMN compra INTEGER",
+  "ALTER TABLE contas_pagar ADD COLUMN investimento INTEGER",
+  "ALTER TABLE contas_pagar ADD COLUMN data_registro TEXT",
   "ALTER TABLE livro_caixa ADD COLUMN plano_contas1 TEXT",
   "ALTER TABLE livro_caixa ADD COLUMN plano_contas2 TEXT",
   "ALTER TABLE livro_caixa ADD COLUMN data_lancamento TEXT",
@@ -509,12 +591,21 @@ const MIGRACOES = [
   "ALTER TABLE produtos ADD COLUMN tributo_venda TEXT",
   "ALTER TABLE produtos ADD COLUMN cst_pis TEXT",
   "ALTER TABLE produtos ADD COLUMN cst_cofins TEXT",
+  "ALTER TABLE produtos ADD COLUMN unidade_compra TEXT",
+  "ALTER TABLE produtos ADD COLUMN fator_compra REAL",
+  "ALTER TABLE produtos ADD COLUMN eh_adicional INTEGER",
   // Verificacao dos dias defeituosos: quantas re-sondagens (em execucoes
   // separadas) confirmaram o defeito — so o confirmado entra no chamado.
   "ALTER TABLE coleta_falhas ADD COLUMN verificacoes INTEGER NOT NULL DEFAULT 0",
   // CNPJ da loja (vem no payload da CapaVenda; preenchido pelo sync de
   // vendas) — usado na identificacao de chamados ao suporte.
   "ALTER TABLE lojas ADD COLUMN cnpj TEXT",
+  // Loja com muito movimento estoura o tempo limite quando a busca cobre o mes
+  // inteiro. Quando isso se repete, a loja passa a ser coletada UM DIA POR VEZ
+  // — e esse modo vira o padrao dela, em vez de o sistema insistir na busca
+  // mensal, falhar de novo e desistir do dominio.
+  "ALTER TABLE lojas ADD COLUMN coletar_dia_a_dia INTEGER",
+  "ALTER TABLE lojas ADD COLUMN timeouts_vendas INTEGER NOT NULL DEFAULT 0",
 ];
 
 // Tabelas que ganharam a coluna "conexao" (grupo de lojas) na versao
@@ -524,7 +615,7 @@ const TABELAS_COM_CONEXAO = [
   'venda_itens_cancelados', 'venda_pagamentos', 'fechamentos_caixa',
   'fechamento_itens', 'sangrias', 'provisao_cartoes', 'contas_pagar',
   'livro_caixa', 'notas_fiscais', 'produtos', 'estoque_posicoes',
-  'clientes', 'sync_log',
+  'clientes', 'sync_log', 'inventarios', 'conferencia_vendas',
 ];
 
 // Tabelas cuja chave primaria era um inteiro do ChefWeb (codigo/id) e que
@@ -613,6 +704,116 @@ export function criarSchema(db) {
         WHERE deletado IS NULL AND json_original IS NOT NULL`);
     }
   } catch { /* melhor esforco: sem isso, so os registros novos trazem as marcas */ }
+
+  // Unidade e fator de compra, e a marca de adicional: tudo ja estava no
+  // json_original guardado, entao nao ha motivo para pedir nova carga.
+  try {
+    if (colunas(db, 'produtos').includes('unidade_compra')) {
+      db.exec(`UPDATE produtos SET
+          unidade_compra = json_extract(json_original, '$.UnidadeCompra'),
+          fator_compra = json_extract(json_original, '$.FatorCompra')
+        WHERE unidade_compra IS NULL AND json_original IS NOT NULL`);
+      db.exec("UPDATE produtos SET eh_adicional = 0 WHERE eh_adicional IS NULL");
+      // Quem e adicional nao se sabe pelo proprio cadastro: descobre-se por
+      // aparecer na lista Adicionais de OUTRO produto. A CTE monta o conjunto
+      // uma vez; comparar produto a produto seria quadratico.
+      db.exec(`WITH adicionais AS (
+            SELECT DISTINCT p.conexao AS cx, json_extract(j.value, '$.CodigoProduto') AS cod
+              FROM produtos p, json_each(p.json_original, '$.Adicionais') j)
+          UPDATE produtos SET eh_adicional = 1
+           WHERE EXISTS (SELECT 1 FROM adicionais WHERE cx = produtos.conexao AND cod = produtos.codigo)`);
+    }
+  } catch { /* melhor esforco */ }
+
+  // Marcas do contas a pagar: estavam no json_original desde sempre, entao nao
+  // ha motivo para pedir nova carga. `deletado` e o mais importante — sem ele,
+  // lancamentos apagados no ChefWeb continuam somando na DRE.
+  try {
+    if (colunas(db, 'contas_pagar').includes('deletado')) {
+      db.exec(`UPDATE contas_pagar SET
+          deletado = CASE WHEN json_extract(json_original, '$.Deletado') IN (1, 'true') THEN 1 ELSE 0 END,
+          compra = CASE WHEN json_extract(json_original, '$.Compra') IN (1, 'true') THEN 1 ELSE 0 END,
+          investimento = CASE WHEN json_extract(json_original, '$.Investimento') IN (1, 'true') THEN 1 ELSE 0 END,
+          data_registro = substr(json_extract(json_original, '$.DataRegistro'), 1, 10)
+        WHERE deletado IS NULL AND json_original IS NOT NULL`);
+    }
+  } catch { /* melhor esforco */ }
+
+  // Planos de contas gravados com entidade HTML ("MAT&#201;RIA PRIMA"): o
+  // mesmo plano virava dois nos agrupamentos da DRE e escapava dos filtros por
+  // categoria. Normaliza o que ja esta no banco — a sincronizacao passou a
+  // decodificar na entrada.
+  try {
+    const decodificar = (t) => {
+      if (typeof t !== 'string' || !t.includes('&')) return t;
+      let v = t;
+      for (let i = 0; i < 3 && v.includes('&'); i += 1) {
+        const antes = v;
+        v = v.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+          .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+          .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+          .replace(/&quot;/gi, '"').replace(/&apos;/gi, "'")
+          .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&');
+        if (v === antes) break;
+      }
+      return v;
+    };
+    // Todo campo de texto que veio da API pode ter entidade: a lista cobre o
+    // que o gestor ve em relatorio e o que serve de chave em agrupamento.
+    const TEXTOS = {
+      contas_pagar: ['fornecedor', 'descricao', 'plano_contas1', 'plano_contas2'],
+      livro_caixa: ['descricao', 'natureza', 'conta', 'plano_contas1', 'plano_contas2'],
+      produtos: ['nome', 'grupo', 'subgrupo'],
+      venda_itens: ['nome_produto', 'grupo', 'subgrupo', 'atendente'],
+      venda_pagamentos: ['descricao'],
+      notas_fiscais: ['fornecedor_ou_cliente'],
+      clientes: ['nome'],
+      lojas: ['nome'],
+      fechamentos_caixa: ['nome_loja', 'operador_caixa'],
+    };
+    // Espaco nas pontas quebra juncao por texto em silencio — mesma familia de
+    // problema das entidades, mesmo remedio: normalizar o que ja esta gravado.
+    for (const [tabela, cols] of Object.entries(TEXTOS)) {
+      if (colunas(db, tabela).length === 0) continue;
+      for (const coluna of cols) {
+        try {
+          db.exec(`UPDATE ${tabela} SET ${coluna} = TRIM(${coluna})
+                    WHERE ${coluna} IS NOT NULL AND ${coluna} <> TRIM(${coluna})`);
+        } catch { /* coluna ausente nesta versao */ }
+      }
+    }
+    for (const [tabela, cols] of Object.entries(TEXTOS)) {
+      if (colunas(db, tabela).length === 0) continue;
+      for (const coluna of cols) {
+        if (!colunas(db, tabela).includes(coluna)) continue;
+        const sujos = db.prepare(
+          `SELECT DISTINCT ${coluna} AS v FROM ${tabela}
+            WHERE ${coluna} LIKE '%&#%' OR ${coluna} LIKE '%&amp;%' OR ${coluna} LIKE '%&lt;%'
+               OR ${coluna} LIKE '%&gt;%' OR ${coluna} LIKE '%&quot;%' OR ${coluna} LIKE '%&nbsp;%'`
+        ).all();
+        const upd = db.prepare(`UPDATE ${tabela} SET ${coluna} = ? WHERE ${coluna} = ?`);
+        for (const { v } of sujos) {
+          const limpo = decodificar(v);
+          if (limpo !== v) upd.run(limpo, v);
+        }
+      }
+    }
+  } catch { /* melhor esforco */ }
+
+  // Custo das fotografias de estoque tiradas antes de o custo passar a ser
+  // congelado na coleta. Usa o custo ATUAL do cadastro — e o melhor
+  // disponivel para elas, ja que a API nao devolve custo no estoque e o
+  // catalogo sobrescreve o preco de compra a cada sincronizacao. As fotos
+  // novas nascem com o custo do proprio dia (ver sincronizar.mjs).
+  try {
+    if (colunas(db, 'estoque_posicoes').includes('custo')) {
+      db.exec(`UPDATE estoque_posicoes SET custo = (
+            SELECT p.preco_compra FROM produtos p
+             WHERE p.conexao = estoque_posicoes.conexao
+               AND p.codigo = estoque_posicoes.codigo_produto)
+          WHERE custo IS NULL`);
+    }
+  } catch { /* melhor esforco */ }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

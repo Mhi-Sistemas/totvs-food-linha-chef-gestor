@@ -20,6 +20,8 @@
 // Acrescente --json para a saída estruturada.
 
 import { abrirBanco } from './criar-banco.mjs';
+import { estoqueNaData, comprasDoPeriodo, receitaDeProdutos } from './cmv.mjs';
+import { conferirTodos, avisoParaGestor, detalhar } from './completude.mjs';
 import { ehFeriado } from './calendario.mjs';
 
 // ---------- utilitários ----------
@@ -61,6 +63,131 @@ function filtroGrupo(db, grupo, alias = '') {
 
 // ---------- 8. QUALIDADE DOS DADOS ----------
 
+// CUSTO INCOERENTE: custo unitario fora da realidade do produto.
+//
+// A causa mais comum nao e digitacao, e CONVERSAO DE EMBALAGEM na entrada da
+// mercadoria: compra-se a caixa com 1.000 potes por R$ 518 e, sem o fator de
+// conversao preenchido, o pote passa a custar R$ 518 em vez de R$ 0,52. O
+// mesmo com o barril de chopp de 50 litros lancado como 1 litro, ou o pacote
+// de 18 aguas lancado como 1 agua. O foco sao insumos e produtos de revenda,
+// onde a compra por embalagem acontece.
+//
+// O que NAO e defeito: produto ADICIONAL (item filho de um principal) com
+// preco de venda 0 ou 0,01 por estrategia comercial. O custo fica altissimo
+// em relacao ao preco por aritmetica, e isso e esperado — esses itens ficam
+// fora do alerta, senao a lista enche de falso positivo.
+//
+// A API nao devolve o FatorCompra (vem sempre nulo), entao a deteccao usa
+// tres sinais, do mais forte ao mais fraco.
+const CUSTO_PISO = 1;            // abaixo de R$ 1 o ruido de centavos domina
+const CUSTO_X_MEDIANA_UNIDADE = 5;   // com unidade de compra diferente
+const CUSTO_X_MEDIANA_SOZINHO = 10;  // sem esse indicio, exige-se mais
+const AMOSTRA_MINIMA_SUBGRUPO = 5;   // subgrupo pequeno nao tem mediana confiavel
+// Adicional de preco simbolico fica fora do alerta (o custo alto em relacao ao
+// preco e estrategia comercial, nao defeito) — MAS ha um limite para o
+// absurdo: um adicional que custa mil vezes o que custam os seus pares esta
+// errado, e o preco de venda nao tem nada a ver com isso.
+const CUSTO_X_MEDIANA_ADICIONAL = 50;
+
+function custosIncoerentes(db, grupo) {
+  const g = filtroGrupo(db, grupo, 'p');
+  let linhas;
+  try {
+    linhas = db.prepare(`
+      WITH base AS (
+        SELECT p.conexao, p.codigo, p.nome, p.subgrupo, p.unidade, p.unidade_compra,
+               p.preco_compra AS custo, p.preco_venda AS venda,
+               CASE WHEN COALESCE(p.eh_adicional, 0) = 1
+                      OR COALESCE(p.subgrupo, '') LIKE '%ADICIONAL%' THEN 1 ELSE 0 END AS adicional,
+               -- Adicional de preco simbolico: entra no calculo da mediana
+               -- (ele faz parte do subgrupo e a mediana e robusta a outlier),
+               -- mas so vira alerta no caso extremo, tratado adiante.
+               CASE WHEN (COALESCE(p.eh_adicional, 0) = 1
+                          OR COALESCE(p.subgrupo, '') LIKE '%ADICIONAL%')
+                     AND COALESCE(p.preco_venda, 0) <= 0.01 THEN 1 ELSE 0 END AS simbolico
+          FROM produtos p
+         WHERE p.ativo = 1 AND p.preco_compra > 0 AND p.codigo NOT IN (997, 999)
+           ${g.sql}),
+      -- A mediana sai dos produtos de venda normal: incluir os adicionais de
+      -- preco simbolico deslocaria a referencia de todos os subgrupos onde eles
+      -- existem, mudando alertas que nada tem a ver com eles.
+      ordenada AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY conexao, subgrupo ORDER BY custo) AS rn,
+                  COUNT(*) OVER (PARTITION BY conexao, subgrupo) AS n
+          FROM base WHERE simbolico = 0),
+      medianas AS (
+        SELECT conexao, subgrupo, AVG(custo) AS mediana, MAX(n) AS amostra
+          FROM ordenada WHERE rn IN ((n + 1) / 2, (n + 2) / 2)
+         GROUP BY conexao, subgrupo)
+      SELECT b.*, m.mediana, m.amostra
+        FROM base b LEFT JOIN medianas m
+          ON m.conexao = b.conexao AND m.subgrupo IS b.subgrupo`).all(...g.params);
+  } catch {
+    return []; // banco de versao anterior, sem as colunas de compra
+  }
+
+  const achados = [];
+  for (const r of linhas) {
+    const temMediana = r.amostra >= AMOSTRA_MINIMA_SUBGRUPO && r.mediana > 0;
+    const vezes = temMediana ? r.custo / r.mediana : null;
+    const unidadeDifere = !!r.unidade_compra && !!r.unidade && r.unidade_compra !== r.unidade;
+    const vendido = (r.venda ?? 0) > 0.01;
+    let motivo = null;
+    let confianca = null;
+
+    // Adicional de preco simbolico so aparece quando o custo e absurdo diante
+    // dos proprios pares — a comparacao com o preco de venda nao vale para ele.
+    if (r.simbolico && !(vezes >= CUSTO_X_MEDIANA_ADICIONAL)) continue;
+    if (r.simbolico) {
+      achados.push({
+        grupo: r.conexao, codigo: r.codigo, nome: r.nome, subgrupo: r.subgrupo,
+        unidade: r.unidade, unidade_compra: r.unidade_compra,
+        custo: r.custo, preco_venda: r.venda,
+        custo_tipico_subgrupo: Number(r.mediana.toFixed(2)),
+        vezes_a_mediana: Number(vezes.toFixed(1)),
+        confianca: 'alta',
+        motivo: `${vezes.toFixed(0)}x o custo típico do subgrupo `
+          + `(mediana ${brl(r.mediana)}) — é adicional de preço simbólico, onde custo alto `
+          + 'costuma ser proposital, mas esta diferença é grande demais para ser estratégia',
+      });
+      continue;
+    }
+
+    if (r.custo >= CUSTO_PISO && unidadeDifere && vezes >= CUSTO_X_MEDIANA_UNIDADE) {
+      motivo = `comprado em ${r.unidade_compra} e consumido em ${r.unidade} — o custo `
+        + `parece ser o da embalagem inteira (${vezes.toFixed(0)}x o típico do subgrupo); `
+        + 'confira o fator de conversão na entrada da mercadoria';
+      confianca = 'alta';
+    } else if (vendido && !r.adicional && r.custo > r.venda * 1.5 && r.custo >= CUSTO_PISO) {
+      // O preco do adicional e subsidiado por decisao comercial, entao nao
+      // serve de referencia para o custo — mesmo quando nao e simbolico. Para
+      // eles vale so a comparacao com o padrao do proprio subgrupo (abaixo),
+      // que ainda pega o caso escandaloso.
+
+      motivo = `custo ${brl(r.custo)} maior que o próprio preço de venda ${brl(r.venda)}`;
+      confianca = 'alta';
+    } else if (r.custo >= CUSTO_PISO && vezes >= CUSTO_X_MEDIANA_SOZINHO) {
+      motivo = `${vezes.toFixed(0)}x o custo típico do subgrupo `
+        + `(mediana ${brl(r.mediana)}, ${r.amostra} produtos)`;
+      confianca = 'media';
+    }
+    if (!motivo) continue;
+    achados.push({
+      grupo: r.conexao, codigo: r.codigo, nome: r.nome, subgrupo: r.subgrupo,
+      unidade: r.unidade, unidade_compra: r.unidade_compra,
+      custo: r.custo, preco_venda: r.venda,
+      custo_tipico_subgrupo: temMediana ? Number(r.mediana.toFixed(2)) : null,
+      vezes_a_mediana: vezes ? Number(vezes.toFixed(1)) : null,
+      confianca, motivo,
+    });
+  }
+  // Mais grave primeiro: confianca alta, depois o mais distante do tipico.
+  achados.sort((a, b) => (a.confianca === b.confianca
+    ? (b.vezes_a_mediana ?? 0) - (a.vezes_a_mediana ?? 0)
+    : (a.confianca === 'alta' ? -1 : 1)));
+  return achados;
+}
+
 function qualidade(db, args) {
   const g = filtroGrupo(db, args.grupo);
   const num = (sql, ...p) => db.prepare(sql).get(...p) ?? {};
@@ -92,6 +219,7 @@ function qualidade(db, args) {
   ).all(...(args.grupo ? [args.grupo] : []));
 
   const cobertura = (parte, total) => (total > 0 ? Math.round((100 * parte) / total) : 0);
+  const custoSuspeito = custosIncoerentes(db, args.grupo);
   const alertas = [];
   const covCusto = cobertura(produtos.com_custo, produtos.total);
   if (covCusto < 80) {
@@ -111,6 +239,20 @@ function qualidade(db, args) {
       assunto: 'estoque negativo',
       texto: `${estoque.negativos} de ${estoque.itens} itens com saldo negativo — `
         + 'venda sem entrada ou ficha técnica errada. Compromete CMV real e sugestão de compra.',
+    });
+  }
+  if (custoSuspeito.length > 0) {
+    const altos = custoSuspeito.filter((c) => c.confianca === 'alta');
+    alertas.push({
+      grave: altos.length > 0,
+      assunto: 'custos incoerentes',
+      texto: `${custoSuspeito.length} produto(s) com custo fora da realidade`
+        + (altos.length > 0 ? ` (${altos.length} com indício forte)` : '')
+        + ' — quase sempre fator de conversão errado na entrada da mercadoria '
+        + '(a caixa lançada como se fosse uma unidade). Distorce CMV, margem e '
+        + 'valor do estoque. Exemplos: '
+        + custoSuspeito.slice(0, 3).map((c) => `${c.nome} (${brl(c.custo)}/${c.unidade})`).join('; '),
+      itens: custoSuspeito,
     });
   }
   if (produtos.sem_categoria > 0) {
@@ -145,6 +287,7 @@ function qualidade(db, args) {
       vendas_com_pessoas: `${cobertura(vendas.com_pessoas, vendas.total)}%`,
       estoque_negativo: estoque.negativos,
     },
+    custos_incoerentes: custoSuspeito,
     alertas,
   };
   if (args.json) { console.log(JSON.stringify(resultado, null, 2)); return; }
@@ -154,6 +297,175 @@ function qualidade(db, args) {
     + ` | estoque negativo: ${estoque.negativos} itens`);
   if (alertas.length === 0) console.log('Nenhum problema relevante de qualidade encontrado.');
   for (const a of alertas) console.log(`${a.grave ? '[GRAVE] ' : '[atenção] '}${a.texto}`);
+  if (custoSuspeito.length > 0) {
+    console.log(`
+CUSTOS A CONFERIR NO CHEFWEB (${custoSuspeito.length})`);
+    const mostrar = args.todos ? custoSuspeito : custoSuspeito.slice(0, 20);
+    for (const c of mostrar) {
+      console.log(`  ${c.codigo} ${(c.nome ?? '').slice(0, 42).padEnd(42)} `
+        + `${brl(c.custo).padStart(12)}/${c.unidade ?? '?'}  [${c.confianca}]`);
+      console.log(`      ${c.subgrupo ?? 'sem categoria'} — ${c.motivo}`);
+    }
+    if (mostrar.length < custoSuspeito.length) {
+      console.log(`  ... e mais ${custoSuspeito.length - mostrar.length}. `
+        + 'Use --todos para a lista completa ou --json para levar para planilha.');
+    }
+  }
+}
+
+// ---------- 1a. COMPLETUDE ----------
+//
+// A CONFERENCIA QUE VEM ANTES DE TUDO. Pedido expresso de gestor (issue #3):
+// o assistente nao pode entregar analise de vendas de um periodo com dias
+// faltando ou incompletos sem avisar antes. Rode isto antes de montar painel,
+// relatorio, DRE ou qualquer numero de vendas; se houver buraco, diga ao
+// gestor o tamanho dele e so siga se ele aceitar.
+function completude(db, args) {
+  const hoje = new Date();
+  const de = args.de && args.de !== true ? args.de
+    : new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1).toISOString().slice(0, 10);
+  const ate = args.ate && args.ate !== true ? args.ate
+    : new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0, 10);
+  const conferencias = conferirTodos(db, {
+    de, ate,
+    grupo: args.grupo && args.grupo !== true ? args.grupo : null,
+    loja: args.loja && args.loja !== true ? args.loja : null,
+  });
+
+  if (args.json) { console.log(JSON.stringify(conferencias, null, 2)); return; }
+
+  console.log(`CONFERÊNCIA DOS DADOS — ${dmy(de)} a ${dmy(ate)}`);
+  let algum = false;
+  for (const c of conferencias) {
+    const aviso = avisoParaGestor(c);
+    console.log('');
+    console.log(`Grupo ${c.grupo}: ${aviso ?? 'dados completos — pode analisar com confiança.'}`);
+    if (aviso) {
+      algum = true;
+      for (const l of detalhar(c)) console.log(l);
+    }
+  }
+  if (algum) {
+    console.log('');
+    console.log('NÃO entregue análise deste período sem antes contar isso ao gestor.');
+    console.log('Ofereça buscar o que falta (sincronizar.mjs --dominio vendas --de ... --ate ...)');
+    console.log('e só siga se ele aceitar — a ressalva sai impressa no painel e na DRE.');
+    process.exitCode = 3; // permite ao chamador saber que houve buraco
+  }
+}
+
+// ---------- 1b. CMV REAL ----------
+//
+// A conta e as tres fontes possiveis vivem em cmv.mjs, porque a DRE responde a
+// MESMA pergunta e nao pode divergir desta tela.
+
+function cmv(db, args) {
+  const hoje = new Date();
+  const inicioMesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  const fimMesPassado = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+  const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const de = args.de && args.de !== true ? args.de : iso(inicioMesPassado);
+  const ate = args.ate && args.ate !== true ? args.ate : iso(fimMesPassado);
+  const loja = args.loja && args.loja !== true ? args.loja : null;
+
+  const grupos = args.grupo && args.grupo !== true
+    ? [args.grupo]
+    : db.prepare('SELECT DISTINCT conexao FROM vendas ORDER BY conexao').all().map((r) => r.conexao);
+
+  const resultados = [];
+  for (const conexao of grupos) {
+    // O estoque inicial e a posicao da VESPERA: o movimento do primeiro dia do
+    // periodo ja pertence ao periodo analisado.
+    const vespera = new Date(Date.parse(de) - 86400000).toISOString().slice(0, 10);
+    const inicial = estoqueNaData(db, conexao, vespera, loja);
+    const final = estoqueNaData(db, conexao, ate, loja);
+
+    const compras = comprasDoPeriodo(db, conexao, de, ate, loja);
+    const b2 = receitaDeProdutos(db, conexao, de, ate, loja);
+
+    const valorCmv = inicial && final ? inicial.valor + compras.valor - final.valor : null;
+    resultados.push({
+      grupo: conexao,
+      loja: loja ? Number(loja) : null,
+      periodo: { de, ate },
+      estoque_inicial: inicial,
+      compras,
+      estoque_final: final,
+      cmv: valorCmv,
+      receita_produtos: b2,
+      cmv_pct: valorCmv !== null && b2 > 0 ? (100 * valorCmv) / b2 : null,
+    });
+  }
+
+  if (args.json) { console.log(JSON.stringify(resultados, null, 2)); return; }
+
+  for (const r of resultados) {
+    console.log(`CMV REAL — ${r.grupo}${r.loja ? ` · loja ${r.loja}` : ' · todas as lojas'}`);
+    console.log(`Período analisado: ${dmy(r.periodo.de)} a ${dmy(r.periodo.ate)}`);
+    console.log('');
+    if (r.compras.valor === null) {
+      console.log('Não dá para calcular o CMV real ainda: falta dizer quais contas do seu plano');
+      console.log('são compra de mercadoria. É por elas que as compras do período são apuradas');
+      console.log('(a nota fiscal de entrada não serve: vem com equipamento, utensílio e serviço');
+      console.log('misturados à mercadoria).');
+      console.log('');
+      console.log('  1) node --no-warnings scripts/categorias-planos.mjs sugerir --categoria mercadoria');
+      console.log('  2) apresente a lista ao gestor em linguagem simples e confirme com ele');
+      console.log('  3) node --no-warnings scripts/categorias-planos.mjs definir "PLANO|SUB=mercadoria"');
+      console.log('');
+      continue;
+    }
+    if (!r.estoque_inicial || !r.estoque_final) {
+      const falta = !r.estoque_inicial ? 'do início' : 'do fim';
+      console.log(`Não dá para calcular o CMV real: falta a posição de estoque ${falta} do período.`);
+      console.log('A posição de uma data passada não existe na API. Ou havia fotografia do dia');
+      console.log('(a rotina diária tira uma por dia), ou o gestor importa o inventário contado no');
+      console.log('ChefWeb: scripts/inventario.mjs importar --arquivo <planilha>.');
+      console.log('Enquanto isso, use o CMV teórico (ficha técnica), que não depende de estoque.');
+      console.log('');
+      continue;
+    }
+    const linha = (rot, v) => console.log(`  ${rot.padEnd(34)}${brl(v).padStart(16)}`);
+    const itens = (n) => `${n} ${n === 1 ? 'item' : 'itens'}`;
+    const orig = (e) => `${e.fonte} de ${dmy(e.data)}`
+      + (e.numeros ? ` (nº ${String(e.numeros).split(',').sort().join(', ')})` : '')
+      + (e.defasagem_dias > 0 ? ` — ${e.defasagem_dias} dia(s) de defasagem` : '');
+    linha('Estoque inicial', r.estoque_inicial.valor);
+    console.log(`      ${orig(r.estoque_inicial)}, ${itens(r.estoque_inicial.itens)}`);
+    linha('(+) Compras do período', r.compras.valor ?? 0);
+    console.log(`      ${r.compras.lancamentos} lançamento(s) de compra de mercadoria `
+      + '(contas a pagar, por competência)');
+    linha('(−) Estoque final', r.estoque_final.valor);
+    console.log(`      ${orig(r.estoque_final)}, ${itens(r.estoque_final.itens)}`);
+    linha('= CMV do período', r.cmv);
+    linha('Receita de produtos (B2)', r.receita_produtos);
+    console.log('');
+    console.log(`  %CMV: ${r.cmv_pct !== null ? pct(r.cmv_pct) : '—'}`
+      + '   (referência de mercado: 28% a 35% na maioria dos segmentos)');
+
+    const avisos = [];
+    if (r.estoque_inicial.sem_custo > 0 || r.estoque_final.sem_custo > 0) {
+      avisos.push(`${r.estoque_inicial.sem_custo + r.estoque_final.sem_custo} item(ns) sem custo `
+        + 'conhecido entraram como zero — o CMV sai subestimado.');
+    }
+    if (r.compras.lancamentos === 0) {
+      avisos.push('Nenhum lançamento de compra de mercadoria no período: sem as compras, o CMV é '
+        + 'só a variação do estoque e não tem significado.');
+    }
+    const equilibrio = Math.min(r.estoque_inicial.itens, r.estoque_final.itens)
+      / Math.max(r.estoque_inicial.itens, r.estoque_final.itens, 1);
+    if (equilibrio < 0.5) {
+      avisos.push('As duas pontas cobrem quantidades de itens muito diferentes '
+        + `(${r.estoque_inicial.itens} × ${r.estoque_final.itens}) — provavelmente uma delas é uma `
+        + 'contagem parcial, e comparar as duas não fecha conta.');
+    }
+    if (r.cmv_pct !== null && (r.cmv_pct < 0 || r.cmv_pct > 80)) {
+      avisos.push(`%CMV de ${pct(r.cmv_pct)} está fora de qualquer faixa plausível — confira se as `
+        + 'duas pontas são contagens completas e se os custos estão corretos (analisar.mjs qualidade).');
+    }
+    for (const a of avisos) console.log(`\n  ⚠️ ${a}`);
+    console.log('');
+  }
 }
 
 // ---------- 2. ANOMALIAS ----------
@@ -787,6 +1099,8 @@ const args = lerArgs();
 const db = abrirBanco({ somenteLeitura: true });
 try {
   if (acao === 'qualidade') qualidade(db, args);
+  else if (acao === 'completude') completude(db, args);
+  else if (acao === 'cmv') cmv(db, args);
   else if (acao === 'anomalias') anomalias(db, args);
   else if (acao === 'variacao') variacao(db, args);
   else if (acao === 'benchmark') benchmark(db, args);
@@ -794,7 +1108,7 @@ try {
   else if (acao === 'simular') simular(db, args);
   else if (acao === 'fiscal') fiscal(db, args);
   else {
-    console.error('Ação inválida. Use: qualidade | anomalias | variacao | benchmark | cesta | simular | fiscal');
+    console.error('Ação inválida. Use: qualidade | completude | cmv | anomalias | variacao | benchmark | cesta | simular | fiscal');
     process.exitCode = 1;
   }
 } finally {

@@ -34,6 +34,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { abrirBanco } from './criar-banco.mjs';
+import { conferirTodos, ressalvaImpressa } from './completude.mjs';
 import { feriadosDoAno, eventosDoPeriodo } from './calendario.mjs';
 import { abrirNoSistema } from './plataforma.mjs';
 import { carregarIdentidade } from './identidade.mjs';
@@ -335,13 +336,25 @@ function executarSpec(spec) {
       } catch { /* sem tabela de eventos: segue so com feriados */ }
       marcas = marcas.slice(0, 12);
     }
-    return { conjuntos, marcas };
+    // Buraco nos dados vai IMPRESSO no painel, nao so dito no chat: o painel
+    // sobrevive à conversa, é impresso, é mandado por e-mail — e quem o ler
+    // depois precisa saber que os números estão menores que a realidade.
+    let ressalva = null;
+    if (spec.periodo?.de && spec.periodo?.ate) {
+      try {
+        ressalva = ressalvaImpressa(conferirTodos(db, {
+          de: spec.periodo.de, ate: spec.periodo.ate, grupo: spec.grupo ?? null,
+        }));
+      } catch { /* sem cadastro de lojas ou sem fechamentos: nao bloqueia o painel */ }
+    }
+    return { conjuntos, marcas, ressalva };
   } finally {
     db.close();
   }
 }
 
 function gerarHtml(spec, dados) {
+  const ressalva = dados?.ressalva ?? null;
   const agora = new Date();
   const echarts = readFileSync(join(RAIZ, 'assets', 'echarts.min.js'), 'utf8');
   // Identidade visual: padrao ChefWeb ou, se o gestor enviou a logomarca
@@ -418,6 +431,8 @@ function gerarHtml(spec, dados) {
   header img{height:40px}
   header h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.1px}
   header .carimbo{margin-left:auto;font-size:12.5px;opacity:.75;text-align:right}
+  .ressalva{margin:0;padding:12px 22px;background:#fff4e5;color:#7a4a00;
+    border-bottom:1px solid #f0d9b5;font-size:13.5px;line-height:1.5}
   main{max-width:1180px;margin:0 auto;padding:22px 20px 8px}
   .filtro{display:flex;align-items:center;gap:10px;margin:0 0 18px}
   .filtro label{font-size:13.5px;font-weight:600;color:var(--navy)}
@@ -509,6 +524,7 @@ function gerarHtml(spec, dados) {
 </head>
 <body>
 <header>${logo ? `<img src="${logo}" alt="TOTVS Chef">` : ''}<h1>${esc(spec.titulo)}</h1><div class="carimbo">${esc(carimbo)}</div></header>
+${ressalva ? `<div class="ressalva">${esc(ressalva)}</div>` : ''}
 <main>
   ${spec.observacao ? `<p class="observacao">${esc(spec.observacao)}</p>` : ''}
   ${filtroHtml}

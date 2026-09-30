@@ -154,6 +154,36 @@ parecem ser gastos com equipe: ... confirma?") e grave com `definir` **só o
 que ele confirmar** — nunca assuma. Pergunte também se a taxa de serviço
 repassada à equipe deve compor o CMO.
 
+## CMV: três fontes, e o gestor escolhe
+
+Antes de entregar a primeira DRE, **explique as três formas de apurar o CMV e
+pergunte qual ele quer ver** — nunca decida sozinho. O roteiro completo em
+linguagem de gestor está em `docs/ajuda/como-calculamos-o-cmv.md`; resumo:
+
+- **teórico** — ficha técnica dos itens vendidos. Funciona desde o primeiro
+  dia, para qualquer período, mas mostra o que *deveria* ter sido consumido:
+  não enxerga desperdício, quebra nem desvio.
+- **real** — estoque inicial + compras − estoque final. É o consumo que de
+  fato aconteceu, e a diferença dele para o teórico **é a perda**. Precisa de
+  posição de estoque nas duas pontas do mês.
+- **compras** — planos de contas marcados como compra de mercadoria. Bate com
+  o extrato, mas confunde comprar com consumir.
+
+Ver/definir: `node --no-warnings scripts/dre.mjs cmv-fonte [teorico|real|compras]`.
+
+**A restrição que o gestor precisa entender**: o sistema da TOTVS só informa o
+estoque de HOJE, nunca o de uma data passada. Por isso o CMV real só existe a
+partir da instalação — a rotina diária tira uma fotografia por dia, e cada dia
+sem ela é um dia que não volta. Para meses anteriores, a saída é importar o
+**inventário** que o gestor já conta no ChefWeb
+(`scripts/inventario.mjs importar`, passo a passo ilustrado em
+`docs/ajuda/exportar-inventario.md`). Ofereça isso sempre que ele pedir CMV de
+um período que o assistente não acompanhou.
+
+Para a fonte `compras`, o mapeamento dos planos segue o mesmo ritual do CMO:
+`categorias-planos.mjs sugerir --categoria mercadoria`, apresente ao gestor e
+grave **só o que ele confirmar**.
+
 ## Metas
 
 `node --no-warnings scripts/metas.mjs listar|definir|remover` — sempre que

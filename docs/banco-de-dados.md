@@ -115,8 +115,33 @@ aberto**), `valor`, `valor_pago`, `json_original`.
 `data_leitura` (dia em que a posição foi capturada), `codigo_loja`,
 `codigo_produto`, `nome_produto` (frequentemente NULL — a API de estoque não
 traz o nome; **faça join com `produtos`** por `codigo_produto`), `unidade`,
-`quantidade`, `custo` (NULL nesta API; use `produtos.preco_compra`),
-`json_original`. Posição atual = `data_leitura = (SELECT MAX(data_leitura) ...)`.
+`quantidade`, `custo` (**custo do dia da foto**, congelado na coleta a partir de
+`produtos.preco_compra` — use-o para valorizar estoque histórico, nunca o
+cadastro atual, que é sobrescrito a cada sincronização), `json_original`.
+Posição atual = `data_leitura = (SELECT MAX(data_leitura) ...)`.
+
+### `conferencia_vendas` — um registro por cupom emitido
+`conexao` + `codigo_loja` + `data_caixa` + `numero_caixa` + `numero_cupom` (PK),
+`periodo`, `valor_total` (a API manda como texto `"$39.80"`; aqui já é número),
+`cpf_cnpj`, `chave`, `numero_nfce`, `status_nfce`, `motivo_rejeicao`,
+`modelo_fiscal`, `json_original`.
+
+É a **terceira testemunha** do movimento de um dia, ao lado de `vendas` e de
+`fechamentos_caixa` — usada por `scripts/completude.mjs` para saber se a coleta
+de vendas veio completa. Diferente das vendas, **não tem trava de horário**.
+
+### `inventarios` — contagens físicas importadas do ChefWeb
+`conexao` + `data` + `codigo_loja` + `numero` + `codigo_produto` (PK),
+`nome_produto`, `unidade`, `quantidade_contada` (**a contagem física — é esta
+que vale como posição de estoque da data**), `quantidade_sistema` (o saldo que
+o sistema tinha), `diferenca`, `valor_diferenca` (valor da DIFERENÇA, não do
+estoque contado), `custo_unitario` (derivado de `valor_diferenca ÷ diferenca` —
+**o custo praticado na data**, única fonte de custo histórico que o ChefWeb
+entrega), `motivo`, `arquivo`, `importado_em`.
+
+Importado com `scripts/inventario.mjs` a partir do relatório 41 do ChefWeb.
+Existe porque a API de estoque não aceita data: sem inventário não há estoque
+inicial de um mês anterior à instalação, e portanto não há CMV real.
 
 ### `clientes`
 `codigo` (PK), `nome`, `tipo_pessoa`, `documento`, `email`, `telefone`,

@@ -92,12 +92,30 @@ imediatamente antes de cada chamada (ver `scripts/chef-api.mjs`). Não há refre
 | produtos | `/api/produto/listarProdutos` | GET | `request.codigoLoja`, `request.completa` (prefixo `request.`!) |
 | estoque | `/api/Estoque/ListarEstoque` | GET | `requisicao.codigoLoja`, `requisicao.completa`, `requisicao.produtos` (multi) |
 | clientes | `/api/CadastroCliente/Listar` | GET | `requisicao.codigoLoja` (OBRIGATÓRIO — sem ele: erro 20 de acesso), `requisicao.completa`. **Sem filtro de data** (DataInicial/DataFinal/DataAtualizacao são ignorados — testado em 28/09/2026): é sempre fotografia completa. O cadastro é ~99% central (uma loja devolve quase tudo; fichas residuais variam por loja) — por isso a varredura semanal por loja. |
-| — | `/api/ConferenciaVendas/ListConferenciaVenda` | GET | `requisicao.codigoLoja`, datas (disponível, ainda não sincronizado) |
+| conferencia-vendas | `/api/ConferenciaVendas/ListConferenciaVenda` | GET | `CodigoLoja`, `DataInicial`, `DataFinal` (**sem** o prefixo `requisicao.` — com ele a API responde erro 20 de acesso à loja) |
 
 Outras variantes de vendas existem (`/api/CapaVenda/ListPorNumeroFechamento`,
 `ListPorDataIntegracaoChefweb`, `/api/Vendas/ObterVendasNFCe|SAT|ECF` e
 canceladas) — úteis para integrações; este projeto usa `ListPorDataMovimento`
 por ser a visão gerencial por dia de movimento.
+
+## Conferência de vendas — a terceira testemunha
+
+Um registro **por cupom emitido**: `Loja`, `DataCaixaOperacao` (DD/MM/AAAA),
+`Periodo`, `NumeroCaixa`, `NumeroCupom`, `CPFouCNPJ`, `ValorTotal`, `Chave`,
+`Protocolo`, `NumeroNFCe`, `StatusNFCe`, `MotivoRejeicaoNFCe`, `ModeloFiscal`.
+
+Duas particularidades validadas em 30/09/2026:
+
+- ⚠️ **`ValorTotal` vem como TEXTO no formato `"$39.80"`** — com cifrão e ponto
+  decimal, não como número. Quem somar direto recebe `NaN`.
+- **Não tem a trava de horário das vendas**: um dia de 84 dias atrás foi
+  buscado às 13h sem recusa. É o que permite conferir o histórico a qualquer
+  hora, sem esperar a madrugada.
+
+Serve para responder "a coleta de vendas veio completa?" cruzando com a
+CapaVenda e com o fechamento de caixa (ver `scripts/completude.mjs`). Numa
+validação real as três bateram ao centavo.
 
 ## Estrutura da resposta de CapaVenda (resumo)
 

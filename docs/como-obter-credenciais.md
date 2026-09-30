@@ -15,11 +15,18 @@ Para o assistente se conectar ao sistema da sua loja, você precisa de
   (<https://chefweb.chef.totvs.com.br>). Se você não tem, peça a quem administra o
   sistema na sua empresa.
 
-  > ⚠️ **Permissões**: esse usuário precisa ter **acesso total aos relatórios**
-  > no ChefWeb — e, em redes com mais de uma loja, essa permissão deve estar
-  > **replicada em todas as lojas**. Sem isso, as consultas do assistente podem
-  > voltar vazias ou incompletas. Quem administra o ChefWeb na sua empresa (ou o
-  > suporte TOTVS) ajusta isso no cadastro de usuários/permissões.
+  > ⚠️ **Permissões**: esse usuário precisa ter **permissão total** no ChefWeb —
+  > e essa permissão precisa estar **replicada em todas as lojas**, uma a uma.
+  > Não basta liberar relatórios: sem permissão total, as consultas do
+  > assistente voltam vazias ou incompletas, e o pior é que isso acontece em
+  > silêncio, loja por loja, sem mensagem de erro clara. Quem administra o
+  > ChefWeb na sua empresa (ou o suporte TOTVS) ajusta no cadastro de
+  > usuários/permissões.
+
+  > 🔑 **A senha do ChefWeb expira de tempos em tempos.** Quando isso acontecer,
+  > a busca de dados para de funcionar sem nada ter mudado do seu lado. Basta
+  > dizer ao assistente "minha senha do ChefWeb mudou" que ele abre a página
+  > segura para você digitar a nova — nunca no chat.
 - **Número de série da loja**: no ChefWeb, em **Cadastros → Lojas → Número de
   Série**. Redes com várias lojas: use o número de série da **loja central**
   (geralmente a loja 1) — por ela o assistente enxerga todas as lojas. Se não
