@@ -190,24 +190,36 @@ export function calcularCmv(db, fonte, conexao, de, ate, loja) {
 
 // ---------- preferencia do gestor ----------
 
+// A tabela faz parte do schema (criar-banco.mjs). Isto aqui e so a rede de
+// seguranca para bancos de versoes anteriores, e SO e chamado em caminho de
+// ESCRITA — quem le abre o banco em somente leitura e nao pode criar nada.
 export function garantirPreferencias(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS preferencias (
-    chave TEXT NOT NULL,
-    conexao TEXT NOT NULL DEFAULT '*',
-    valor TEXT NOT NULL,
-    definida_em TEXT NOT NULL DEFAULT (date('now','localtime')),
-    PRIMARY KEY (chave, conexao)
-  )`);
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS preferencias (
+      chave TEXT NOT NULL,
+      conexao TEXT NOT NULL DEFAULT '*',
+      valor TEXT NOT NULL,
+      definida_em TEXT NOT NULL DEFAULT (date('now','localtime')),
+      PRIMARY KEY (chave, conexao)
+    )`);
+  } catch { /* banco somente leitura: quem le nao precisa criar */ }
 }
 
+// LEITURA PURA: nao cria tabela, nao escreve nada. Banco sem a tabela devolve
+// o padrao — e foi justamente o contrario disso que derrubou a DRE na 1.0.8,
+// com "attempt to write a readonly database" em quem nunca definiu a
+// preferencia.
 export function lerPreferencia(db, chave, conexao = null, padrao = null) {
-  garantirPreferencias(db);
-  const especifica = conexao
-    ? db.prepare('SELECT valor FROM preferencias WHERE chave = ? AND conexao = ?').get(chave, conexao)
-    : null;
-  if (especifica) return especifica.valor;
-  const geral = db.prepare("SELECT valor FROM preferencias WHERE chave = ? AND conexao = '*'").get(chave);
-  return geral ? geral.valor : padrao;
+  try {
+    const especifica = conexao
+      ? db.prepare('SELECT valor FROM preferencias WHERE chave = ? AND conexao = ?').get(chave, conexao)
+      : null;
+    if (especifica) return especifica.valor;
+    const geral = db.prepare("SELECT valor FROM preferencias WHERE chave = ? AND conexao = '*'").get(chave);
+    return geral ? geral.valor : padrao;
+  } catch {
+    return padrao; // tabela ainda nao existe neste banco
+  }
 }
 
 export function gravarPreferencia(db, chave, valor, conexao = '*') {

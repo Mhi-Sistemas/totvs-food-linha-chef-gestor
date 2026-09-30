@@ -9,6 +9,20 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.9] — 30/09/2026
+
+### Correções
+
+- **A DRE voltou a abrir.** A versão 1.0.8 trouxe a opção de escolher qual CMV
+  aparece na DRE, mas, em quem ainda não tinha feito essa escolha, o relatório
+  falhava com um erro de acesso ao banco de dados em vez de abrir. Corrigido:
+  sem escolha feita, a DRE usa o CMV teórico, como antes, e você pode trocar
+  quando quiser.
+
+- **O assistente estava respondendo em inglês em alguns computadores.** A
+  instrução de falar sempre em português passou a ser a primeira coisa que ele
+  lê, e agora vale explicitamente para qualquer situação.
+
 ## [1.0.8] — 30/09/2026
 
 ### Novidades

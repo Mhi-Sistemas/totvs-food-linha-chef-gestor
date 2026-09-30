@@ -353,6 +353,18 @@ CREATE TABLE IF NOT EXISTS conferencia_vendas (
 );
 CREATE INDEX IF NOT EXISTS idx_conf_cx_dia ON conferencia_vendas (conexao, data_caixa, codigo_loja);
 
+-- Preferencias do gestor (ex.: qual CMV aparece na DRE). Vive no schema
+-- principal porque e LIDA por scripts que abrem o banco em somente leitura —
+-- criar a tabela na hora da leitura quebrava a DRE em todo computador onde a
+-- preferencia ainda nao tinha sido definida.
+CREATE TABLE IF NOT EXISTS preferencias (
+  chave TEXT NOT NULL,
+  conexao TEXT NOT NULL DEFAULT '*',
+  valor TEXT NOT NULL,
+  definida_em TEXT NOT NULL DEFAULT (date('now','localtime')),
+  PRIMARY KEY (chave, conexao)
+);
+
 -- Categorias dos planos de contas do gestor: quais sao gastos com PESSOAL
 -- (base do CMO) e quais sao COMPRA DE MERCADORIA (base das compras do CMV).
 -- Vive no schema principal — e nao mais criada sob demanda — porque virou

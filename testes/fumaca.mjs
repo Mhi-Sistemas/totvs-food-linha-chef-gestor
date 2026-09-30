@@ -366,6 +366,22 @@ passo('CMV real usa o inventário quando não há fotografia', () => {
   espera(/R\$\s*100,00/.test(saida) && /R\$\s*70,00/.test(saida), `CMV errado: ${saida.slice(0, 500)}`);
 });
 
+await passoAsync('DRE abre em banco onde a preferência nunca foi definida', async () => {
+  // Regressao da 1.0.8: ler a preferencia do CMV criava a tabela, e a DRE abre
+  // o banco em SOMENTE LEITURA — em todo computador que atualizou e nunca
+  // escolheu a fonte, a DRE morria com "attempt to write a readonly database".
+  // O teste anterior nao pegava porque outro passo criava a tabela antes dele.
+  const { abrirBanco } = await import('../scripts/criar-banco.mjs');
+  const db = abrirBanco();
+  try { db.exec('DROP TABLE IF EXISTS preferencias'); } finally { db.close(); }
+
+  const saida = join(RAIZ, 'relatorios', 'dre', 'fumaca-sem-preferencia.html');
+  const r = rodar([join(RAIZ, 'scripts', 'dre.mjs'), 'gerar', '--mes', '2026-01', '--saida', saida]);
+  espera(r.codigo === 0, `DRE não abriu sem a preferência definida: ${r.saida.slice(0, 250)}`);
+  espera(!/readonly|somente leitura/i.test(r.saida), `tentou escrever em banco só de leitura: ${r.saida.slice(0, 200)}`);
+  espera(/CMV teórico/.test(readFileSync(saida, 'utf8')), 'não caiu no padrão (CMV teórico)');
+});
+
 passo('DRE: o gestor escolhe a fonte do CMV', () => {
   const dre = join(RAIZ, 'scripts', 'dre.mjs');
   // Sem argumento, lista as opcoes para o assistente apresentar ao gestor.
