@@ -581,6 +581,49 @@ passo('senha do ChefWeb: atalho de troca', () => {
     inexistente.saida.slice(0, 200));
 });
 
+await passoAsync('cadastro novo antecipa a coleta semanal (e desiste do que não existe)', async () => {
+  // Produtos e clientes sao semanais por causa da cota diaria da API. Quando o
+  // movimento traz codigo que o cadastro nao conhece, a coleta e antecipada —
+  // mas sem insistir para sempre num produto que foi excluido no ChefWeb.
+  const { abrirBanco } = await import('../scripts/criar-banco.mjs');
+  const hoje = new Date().toISOString().slice(0, 10);
+  const db = abrirBanco();
+  try {
+    db.exec("INSERT OR REPLACE INTO vendas (conexao, chave_venda, codigo_loja, data_movimento,"
+      + ` valor_total, cancelada, cliente_codigo) VALUES ('grupo-a', 'fum-cad', 1, '${hoje}', 10, 0, 7777)`);
+    // Simula a rotina ja tendo baixado clientes alguma vez.
+    db.exec("INSERT INTO sync_log (conexao, dominio, registros) VALUES ('grupo-a', 'clientes', 1)");
+  } finally { db.close(); }
+
+  try {
+    const simular = rodar([join(RAIZ, 'scripts', 'rotina.mjs'), 'executar', '--simular']);
+    espera(simular.codigo === 0, simular.saida.slice(0, 200));
+    espera(/clientes: baixar — antecipado/.test(simular.saida),
+      `não antecipou a coleta de clientes: ${simular.saida.slice(0, 400)}`);
+
+    // O cliente 7777 nao existe no ChefWeb: depois de 2 tentativas registradas
+    // (o que `registrarTentativaCadastro` faz apos cada coleta), a rotina para
+    // de antecipar por causa dele e volta ao ritmo semanal.
+    const dbT = abrirBanco();
+    try {
+      dbT.exec("INSERT OR REPLACE INTO cadastros_ausentes (conexao, tipo, codigo, tentativas)"
+        + " VALUES ('grupo-a', 'clientes', 7777, 2)");
+    } finally { dbT.close(); }
+    const depois = rodar([join(RAIZ, 'scripts', 'rotina.mjs'), 'executar', '--simular']);
+    espera(/clientes: em dia \(semanal\)/.test(depois.saida),
+      `continuou insistindo num cadastro que não existe: ${depois.saida.slice(0, 400)}`);
+  } finally {
+    // Limpa SEMPRE: uma asserção que falha no meio deixaria a venda extra para
+    // trás e quebraria o passo de backup, que confere o total.
+    const limpar = abrirBanco();
+    try {
+      limpar.exec("DELETE FROM vendas WHERE chave_venda = 'fum-cad'");
+      limpar.exec("DELETE FROM sync_log WHERE conexao = 'grupo-a' AND dominio = 'clientes'");
+      limpar.exec("DELETE FROM cadastros_ausentes WHERE conexao = 'grupo-a'");
+    } finally { limpar.close(); }
+  }
+});
+
 passo('exportar docx', () => {
   const md = join(tmpdir(), 'fumaca.md');
   writeFileSync(md, '# Título\n\nParágrafo com **negrito**.\n\n- item 1\n- item 2\n', 'utf8');

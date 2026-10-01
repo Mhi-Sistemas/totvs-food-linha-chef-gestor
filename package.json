@@ -1,6 +1,6 @@
 {
   "name": "totvs-food-linha-chef-gestor",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Assistente de gestão para o TOTVS Food Linha Chef via Claude Code ou Codex: sincroniza dados das APIs do ChefWeb para um banco local e gera análises e gráficos gerenciais.",
   "type": "module",
   "private": true,

@@ -353,6 +353,23 @@ CREATE TABLE IF NOT EXISTS conferencia_vendas (
 );
 CREATE INDEX IF NOT EXISTS idx_conf_cx_dia ON conferencia_vendas (conexao, data_caixa, codigo_loja);
 
+-- Codigos que aparecem no movimento mas nao estao no cadastro (produto
+-- vendido que o catalogo ainda nao conhece, cliente novo). Existem para a
+-- rotina diaria saber que vale ANTECIPAR a atualizacao do cadastro, em vez de
+-- esperar a segunda-feira.
+--
+-- A coluna tentativas evita o oposto: produto excluido no ChefWeb nunca vai
+-- aparecer no catalogo, e sem esse contador a rotina gastaria a cota da API
+-- todo dia atras de um codigo que nao existe mais.
+CREATE TABLE IF NOT EXISTS cadastros_ausentes (
+  conexao TEXT NOT NULL DEFAULT 'principal',
+  tipo TEXT NOT NULL,              -- 'produtos' | 'clientes'
+  codigo INTEGER NOT NULL,
+  tentativas INTEGER NOT NULL DEFAULT 0,
+  visto_em TEXT NOT NULL DEFAULT (date('now','localtime')),
+  PRIMARY KEY (conexao, tipo, codigo)
+);
+
 -- Preferencias do gestor (ex.: qual CMV aparece na DRE). Vive no schema
 -- principal porque e LIDA por scripts que abrem o banco em somente leitura —
 -- criar a tabela na hora da leitura quebrava a DRE em todo computador onde a

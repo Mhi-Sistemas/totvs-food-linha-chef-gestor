@@ -9,6 +9,21 @@ são escritas em linguagem de gestor, não de programador.
 > novidade = segundo número). Sem isso, a atualização automática não enxerga
 > nem explica a mudança.
 
+## [1.0.10] — 01/10/2026
+
+### Melhorias
+
+- **Produto e cliente novos entram no dia, não na semana seguinte.** O catálogo
+  de produtos e a lista de clientes são atualizados uma vez por semana, porque
+  o sistema da TOTVS limita quantas vezes por dia essa consulta pode ser feita.
+  O problema é que um produto cadastrado na terça só aparecia na segunda
+  seguinte — e nesse meio-tempo o valor do seu estoque saía com o custo velho,
+  e um cliente novo ficava sem ficha nas análises. Agora, quando o movimento
+  traz um produto ou um cliente que o cadastro ainda não conhece, o assistente
+  **antecipa a atualização para o mesmo dia**. Se o código não existir mesmo
+  (um produto excluído, por exemplo), ele tenta duas vezes e desiste, para não
+  gastar o limite diário à toa.
+
 ## [1.0.9] — 30/09/2026
 
 ### Correções

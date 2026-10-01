@@ -76,6 +76,80 @@ function rodarScript(nome, argumentos) {
   return resultado.status === 0;
 }
 
+// CADASTRO DESATUALIZADO: produtos e clientes sao semanais porque a consulta
+// completa tem cota diaria na API — nao vale gastar todo dia com um cadastro
+// que muda pouco. So que isso deixa ate 6 dias de defasagem, e nesse intervalo
+// a fotografia de estoque valoriza pelo custo velho e o cliente novo fica sem
+// ficha.
+//
+// A saida: continuar semanal POR PADRAO e antecipar quando o proprio movimento
+// denuncia que o cadastro mudou — um produto vendido que o catalogo nao
+// conhece, um cliente que nunca foi baixado.
+//
+// So olha o movimento RECENTE: varrer a base inteira a cada rotina seria caro
+// num banco de 10 GB, e cadastro novo aparece em venda nova.
+const DIAS_PARA_OLHAR_CADASTRO = 45;
+// Depois disso, desiste daquele codigo: produto excluido no ChefWeb nunca vai
+// aparecer no catalogo, e insistir queimaria a cota diaria todo dia.
+const MAX_TENTATIVAS_CADASTRO = 2;
+
+function codigosSemCadastro(db, conexao, tipo, desde) {
+  const sql = tipo === 'produtos'
+    ? `SELECT DISTINCT i.codigo_produto AS codigo
+         FROM venda_itens i
+         JOIN vendas v ON v.conexao = i.conexao AND v.chave_venda = i.chave_venda
+        WHERE i.conexao = ? AND v.data_movimento >= ?
+          AND i.codigo_produto IS NOT NULL AND i.codigo_produto NOT IN (997, 999)
+          AND NOT EXISTS (SELECT 1 FROM produtos p
+                           WHERE p.conexao = i.conexao AND p.codigo = i.codigo_produto)`
+    : `SELECT DISTINCT v.cliente_codigo AS codigo
+         FROM vendas v
+        WHERE v.conexao = ? AND v.data_movimento >= ? AND v.cliente_codigo > 0
+          AND NOT EXISTS (SELECT 1 FROM clientes c
+                           WHERE c.conexao = v.conexao AND c.codigo = v.cliente_codigo)`;
+  try { return db.prepare(sql).all(conexao, desde).map((r) => r.codigo); } catch { return []; }
+}
+
+// Quantos codigos ainda valem uma tentativa.
+//
+// LEITURA PURA: esta funcao e chamada por `montarPlano`, que recebe o banco em
+// SOMENTE LEITURA. Escrever aqui nao so falharia como — pior — o catch
+// silencioso transformaria a falha em "antecipar sempre", queimando a cota
+// diaria da API todo dia. Quem grava e `registrarTentativaCadastro`, no
+// caminho de escrita.
+function cadastroPrecisaAtualizar(db, conexao, tipo, desde) {
+  const codigos = codigosSemCadastro(db, conexao, tipo, desde);
+  if (codigos.length === 0) return 0;
+  let esgotados;
+  try {
+    esgotados = new Set(db.prepare(
+      'SELECT codigo FROM cadastros_ausentes WHERE conexao = ? AND tipo = ? AND tentativas >= ?'
+    ).all(conexao, tipo, MAX_TENTATIVAS_CADASTRO).map((r) => r.codigo));
+  } catch { esgotados = new Set(); } // banco de versao anterior
+  return codigos.filter((c) => !esgotados.has(c)).length;
+}
+
+// Depois de baixar o cadastro: quem continua faltando entra no controle (ou
+// ganha mais uma tentativa); quem apareceu sai da lista.
+function registrarTentativaCadastro(db, conexao, tipo, desde) {
+  try {
+    const aindaFaltam = codigosSemCadastro(db, conexao, tipo, desde);
+    const vivos = new Set(aindaFaltam);
+    for (const { codigo } of db.prepare(
+      'SELECT codigo FROM cadastros_ausentes WHERE conexao = ? AND tipo = ?'
+    ).all(conexao, tipo)) {
+      if (!vivos.has(codigo)) {
+        db.prepare('DELETE FROM cadastros_ausentes WHERE conexao = ? AND tipo = ? AND codigo = ?')
+          .run(conexao, tipo, codigo);
+      }
+    }
+    const somar = db.prepare(`INSERT INTO cadastros_ausentes (conexao, tipo, codigo, tentativas)
+      VALUES (?, ?, ?, 1)
+      ON CONFLICT(conexao, tipo, codigo) DO UPDATE SET tentativas = tentativas + 1`);
+    for (const codigo of aindaFaltam) somar.run(conexao, tipo, codigo);
+  } catch { /* melhor esforco */ }
+}
+
 // Ate onde cada dominio ja foi baixado, por grupo. Devolve Map
 // "conexao|dominio" -> { fim, quando } (dominios sem periodo tem fim vazio,
 // mas registram quando rodaram — e o caso de produtos e clientes).
@@ -126,12 +200,23 @@ function montarPlano(db, conexoes) {
     plano.push(fotoDeHoje
       ? { grupo: conexao.id, dominio: 'estoque', situacao: 'em dia', ate: hoje }
       : { grupo: conexao.id, dominio: 'estoque', situacao: 'baixar' });
-    // Catalogo: as segundas, ou se nunca foi baixado para este grupo.
+    // Catalogo e clientes: as segundas, se nunca foi baixado, OU quando o
+    // movimento recente traz codigo que o cadastro nao conhece.
     const segunda = agora.getDay() === 1;
+    const desdeCadastro = somarDias(hoje, -DIAS_PARA_OLHAR_CADASTRO);
     for (const dominio of DOMINIOS_SEMANAIS) {
       const jaTeve = ultimas.has(`${conexao.id}|${dominio}`);
-      if (segunda || !jaTeve) plano.push({ grupo: conexao.id, dominio, situacao: 'baixar' });
-      else plano.push({ grupo: conexao.id, dominio, situacao: 'em dia (semanal)' });
+      const novos = jaTeve ? cadastroPrecisaAtualizar(db, conexao.id, dominio, desdeCadastro) : 0;
+      if (segunda || !jaTeve || novos > 0) {
+        plano.push({
+          grupo: conexao.id,
+          dominio,
+          situacao: 'baixar',
+          motivo: !jaTeve ? null : (novos > 0 && !segunda
+            ? `${novos} ${dominio === 'produtos' ? 'produto(s)' : 'cliente(s)'} no movimento sem cadastro`
+            : null),
+        });
+      } else plano.push({ grupo: conexao.id, dominio, situacao: 'em dia (semanal)' });
     }
   }
   return { plano, ontem, dentroDaJanela };
@@ -259,7 +344,8 @@ async function executar(args) {
   const aBaixar = plano.filter((p) => p.situacao === 'baixar');
   if (args.simular) {
     for (const p of plano) {
-      const periodo = p.de ? ` ${dmy(p.de)} a ${dmy(p.ate)}${p.truncado ? ' (parte antiga fica para a madrugada)' : ''}` : '';
+      const periodo = (p.de ? ` ${dmy(p.de)} a ${dmy(p.ate)}${p.truncado ? ' (parte antiga fica para a madrugada)' : ''}` : '')
+        + (p.motivo ? ` — antecipado: ${p.motivo}` : '');
       console.log(`  [${p.grupo}] ${p.dominio}: ${p.situacao}${periodo}`);
     }
     console.log(`Simulacao: ${aBaixar.length} busca(s) seriam feitas; nada foi baixado.`);
@@ -281,6 +367,13 @@ async function executar(args) {
     if (p.de) argumentos.push('--de', p.de, '--ate', p.ate);
     console.log(`\n>> [${p.grupo}] ${p.dominio}${p.de ? ` (${dmy(p.de)} a ${dmy(p.ate)})` : ''}`);
     const ok = rodarScript('sincronizar.mjs', argumentos);
+    if (ok && DOMINIOS_SEMANAIS.includes(p.dominio)) {
+      const dbT = abrirBanco();
+      try {
+        registrarTentativaCadastro(dbT, p.grupo, p.dominio,
+          somarDias(isoLocal(new Date()), -DIAS_PARA_OLHAR_CADASTRO));
+      } finally { dbT.close(); }
+    }
     resumo.push({ ...p, ok });
   }
 
@@ -386,7 +479,8 @@ async function executar(args) {
   }
   for (const r of resumo) {
     const periodo = r.de ? ` ${dmy(r.de)} a ${dmy(r.ate)}` : '';
-    console.log(`  [${r.grupo}] ${r.dominio}:${periodo} ${r.ok ? 'ok' : 'FALHOU (veja acima)'}${r.truncado ? ' — parte antiga fica para a madrugada' : ''}`);
+    console.log(`  [${r.grupo}] ${r.dominio}:${periodo} ${r.ok ? 'ok' : 'FALHOU (veja acima)'}${r.truncado ? ' — parte antiga fica para a madrugada' : ''}`
+      + `${r.motivo ? ` — antecipado: ${r.motivo}` : ''}`);
   }
   console.log(backup
     ? `  copia de seguranca: ok (${backup.caminho})`
